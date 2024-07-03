@@ -4,11 +4,10 @@
 //! The implementation is following the description of [The RLPx Transport Protocol](https://github.com/ethereum/devp2p/blob/master/rlpx.md)
 
 use argh::FromArgs;
-use enode::Enode;
 use eyre::Result;
 use tracing::{debug, info, trace};
 
-use crate::ecies::initiator::Initiator;
+use crate::ecies::{initiator::Initiator, recipient::Recipient};
 
 mod ecies;
 mod enode;
@@ -19,7 +18,7 @@ mod utils;
 struct EthereumHandshake {
     /// ethereum node Id
     #[argh(positional)]
-    enodes: Vec<String>,
+    enodes: String,
 }
 
 #[tokio::main]
@@ -29,17 +28,22 @@ async fn main() -> Result<()> {
     }
     tracing_subscriber::fmt::init();
 
+    let random_generator = &mut rand::thread_rng();
+
     info!("Starting ethereum handshake only node");
     let args: EthereumHandshake = argh::from_env();
     info!("Arguments: {args:?}");
 
-    let enodes: Result<Vec<_>> = args.enodes.into_iter().map(|e| Enode::new(&e)).collect();
-    let enodes = enodes?;
-    debug!("Parsed args: {enodes:?}");
+    // let enode = Enode::new(&args.enodes)?;
+    let enode = args.enodes;
 
-    let random_generator = &mut rand::thread_rng();
+    debug!("Parsed args: {enode:?}");
+
     let initiator = Initiator::new(random_generator).await;
     trace!("Initator: {initiator:?}");
+
+    let recipient = Recipient::new(enode.parse()?);
+    trace!("Recipient: {recipient:?}");
 
     Ok(())
 }
@@ -48,8 +52,7 @@ async fn main() -> Result<()> {
 mod tests {
     use rand::{Rng, SeedableRng};
 
-    use crate::ecies::initiator::Initiator;
-
+    use crate::ecies::{initiator::Initiator, recipient::Recipient};
     pub fn static_random_generator() -> impl Rng {
         rand_chacha::ChaCha8Rng::seed_from_u64(625)
     }
@@ -57,12 +60,21 @@ mod tests {
     #[tokio::test]
     async fn test_drive() {
         let random_generator = &mut static_random_generator();
+
         let file1 = "./testing_files/secret1";
-        let initiator = Initiator::test_new(random_generator, file1).await;
-        println!("initiator: {initiator:#?}");
+        let initiator = Initiator::test_new(random_generator, file1)
+            .await
+            .expect("Failed to create initator 1");
+        let _recipient: Recipient = initiator
+            .try_into()
+            .expect("Failed to create recipient from intiator");
 
         let file2 = "./testing_files/secret2";
-        let initiator2 = Initiator::test_new(random_generator, file2).await;
-        println!("initiator2: {initiator2:#?}");
+        let initiator2 = Initiator::test_new(random_generator, file2)
+            .await
+            .expect("Failed to create initator 2");
+        let _recipient2: Recipient = initiator2
+            .try_into()
+            .expect("Failed to create recipient from intiator");
     }
 }

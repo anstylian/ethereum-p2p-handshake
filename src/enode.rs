@@ -12,16 +12,25 @@ pub struct Enode {
 }
 
 impl Enode {
+    #[allow(unused)]
     pub fn new(enode: &str) -> Result<Enode> {
-        enode_parser::parse(enode)
+        enode.parse()
     }
 
-    pub fn address(&self) -> &SocketAddr {
-        &self.address
+    pub fn address(&self) -> SocketAddr {
+        self.address
     }
 
     pub fn node_id(&self) -> NodeId {
         self.node_id
+    }
+}
+
+impl FromStr for Enode {
+    type Err = eyre::Error;
+
+    fn from_str(input: &str) -> Result<Self> {
+        enode_parser::parse(input)
     }
 }
 

@@ -46,4 +46,13 @@ impl Initiator {
         let secret_key = generate_restorable_secret(random_generator, secret_backup).await?;
         Ok(Self::new_inner(secret_key, random_generator))
     }
+
+    #[cfg(test)]
+    pub fn enode(&self) -> Result<crate::enode::Enode> {
+        use crate::utils::pk2id;
+
+        let id = pk2id(&self.public_key);
+
+        format!("enode://{}@127.0.0.1:40404", id).as_str().parse()
+    }
 }
