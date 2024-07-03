@@ -7,7 +7,7 @@ use argh::FromArgs;
 use eyre::Result;
 use tracing::{debug, info, trace};
 
-use crate::ecies::{initiator::Initiator, recipient::Recipient};
+use crate::ecies::parties::{initiator::Initiator, recipient::RecipientDefinition};
 
 mod ecies;
 mod enode;
@@ -42,8 +42,12 @@ async fn main() -> Result<()> {
     let initiator = Initiator::new(random_generator).await;
     trace!("Initator: {initiator:?}");
 
-    let recipient = Recipient::new(enode.parse()?);
+    let recipient = RecipientDefinition::new(enode.parse()?)?;
     trace!("Recipient: {recipient:?}");
+
+    let mut recipient = recipient.connect().await?;
+
+    recipient.abort();
 
     Ok(())
 }
@@ -52,7 +56,11 @@ async fn main() -> Result<()> {
 mod tests {
     use rand::{Rng, SeedableRng};
 
-    use crate::ecies::{initiator::Initiator, recipient::Recipient};
+    use crate::ecies::parties::{
+        initiator::Initiator,
+        recipient::{RecipientDefinition, TestRecipient},
+    };
+
     pub fn static_random_generator() -> impl Rng {
         rand_chacha::ChaCha8Rng::seed_from_u64(625)
     }
@@ -65,16 +73,18 @@ mod tests {
         let initiator = Initiator::test_new(random_generator, file1)
             .await
             .expect("Failed to create initator 1");
-        let _recipient: Recipient = initiator
+        let recipient: RecipientDefinition = initiator
             .try_into()
             .expect("Failed to create recipient from intiator");
+        let _test_recipient_1 = TestRecipient::new(recipient);
 
         let file2 = "./testing_files/secret2";
         let initiator2 = Initiator::test_new(random_generator, file2)
             .await
             .expect("Failed to create initator 2");
-        let _recipient2: Recipient = initiator2
+        let recipient2: RecipientDefinition = initiator2
             .try_into()
             .expect("Failed to create recipient from intiator");
+        let _test_recipient_2 = TestRecipient::new(recipient2);
     }
 }

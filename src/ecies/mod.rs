@@ -1,2 +1,1 @@
-pub mod initiator;
-pub mod recipient;
+pub mod parties;

@@ -2,7 +2,7 @@
 //! The perpose of this module is to be able to generate random secrets,
 //! but also deterministic secrets. Deterministic secrets are needed for testing.
 
-use eyre::Result;
+use eyre::{eyre, Result};
 use rand::Rng;
 use secp256k1::{constants::SECRET_KEY_SIZE, SecretKey};
 use std::path::Path;
@@ -21,7 +21,12 @@ pub async fn generate_restorable_secret<R: Rng, P: AsRef<Path>>(
     if secret_backup.as_ref().is_file() {
         let mut file = OpenOptions::new().read(true).open(secret_backup).await?;
         let buf = &mut [0u8; SECRET_KEY_SIZE];
-        file.read(buf).await?;
+        let n = file.read(buf).await?;
+
+        if n != SECRET_KEY_SIZE {
+            return Err(eyre!("Failed to read full key"));
+        }
+
         let secret = SecretKey::from_slice(buf)?;
         Ok(secret)
     } else {
@@ -33,9 +38,15 @@ pub async fn generate_restorable_secret<R: Rng, P: AsRef<Path>>(
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(secret_backup)
             .await?;
-        file.write(secret.as_ref()).await?;
+
+        let n = file.write(secret.as_ref()).await?;
+        if n != SECRET_KEY_SIZE {
+            return Err(eyre!("Failed to write full key"));
+        }
+
         file.flush().await?;
 
         Ok(secret)

@@ -513,6 +513,7 @@ version = "0.1.0"
 dependencies = [
  "alloy-primitives",
  "argh",
+ "bytes",
  "eyre",
  "nom",
  "rand",
