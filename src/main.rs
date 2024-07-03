@@ -37,7 +37,8 @@ async fn main() -> Result<()> {
     let enodes = enodes?;
     debug!("Parsed args: {enodes:?}");
 
-    let initiator = Initiator::new().await;
+    let random_generator = &mut rand::thread_rng();
+    let initiator = Initiator::new(random_generator).await;
     trace!("Initator: {initiator:?}");
 
     Ok(())
@@ -45,12 +46,23 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ecies::deterministic_secrtets::DeterministicInitiator;
+    use rand::{Rng, SeedableRng};
+
+    use crate::ecies::initiator::Initiator;
+
+    pub fn static_random_generator() -> impl Rng {
+        rand_chacha::ChaCha8Rng::seed_from_u64(625)
+    }
 
     #[tokio::test]
     async fn test_drive() {
-        let _initator = DeterministicInitiator::new()
-            .await
-            .expect("Failed to create deterministic initator");
+        let random_generator = &mut static_random_generator();
+        let file1 = "./testing_files/secret1";
+        let initiator = Initiator::test_new(random_generator, file1).await;
+        println!("initiator: {initiator:#?}");
+
+        let file2 = "./testing_files/secret2";
+        let initiator2 = Initiator::test_new(random_generator, file2).await;
+        println!("initiator2: {initiator2:#?}");
     }
 }

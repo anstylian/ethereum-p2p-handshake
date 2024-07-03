@@ -516,6 +516,7 @@ dependencies = [
  "eyre",
  "nom",
  "rand",
+ "rand_chacha",
  "secp256k1",
  "tokio",
  "tracing",
