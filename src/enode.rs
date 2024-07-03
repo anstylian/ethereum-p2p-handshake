@@ -1,61 +1,107 @@
+use alloy_primitives::hex::FromHex;
 use eyre::Result;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::str::FromStr;
 
-use nom::{
-    bytes::complete::{tag, take_until},
-    IResult,
-};
+use crate::utils::NodeId;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Enode {
-    node_id: String,
+    node_id: NodeId,
     address: SocketAddr,
 }
 
 impl Enode {
     pub fn new(enode: &str) -> Result<Enode> {
-        parse(enode)
+        enode_parser::parse(enode)
+    }
+
+    pub fn address(&self) -> &SocketAddr {
+        &self.address
+    }
+
+    pub fn node_id(&self) -> NodeId {
+        self.node_id
     }
 }
 
-fn eat_enode(input: &str) -> IResult<&str, &str> {
-    tag("enode://")(input)
-}
+mod enode_parser {
+    use super::*;
 
-fn node_id(input: &str) -> IResult<&str, &str> {
-    take_until("@")(input)
-}
+    use nom::{
+        bytes::complete::{tag, take_until},
+        character::complete::digit1,
+        combinator::{complete, map_res},
+        sequence, IResult,
+    };
 
-fn eat_at(input: &str) -> IResult<&str, &str> {
-    tag("@")(input)
-}
+    fn enode(input: &str) -> IResult<&str, &str> {
+        tag("enode://")(input)
+    }
 
-fn parse(input: &str) -> Result<Enode> {
-    let (remaining, _) = eat_enode(input).unwrap();
-    let (remaining, node_id) = node_id(remaining).unwrap();
-    let (ip, _) = eat_at(remaining).unwrap();
+    fn node_id(input: &str) -> IResult<&str, NodeId> {
+        let (remaining, node_id) = take_until("@")(input)?;
+        let node_id = NodeId::from_hex(node_id).map_err(|_| {
+            nom::Err::Failure(nom::error::Error {
+                input,
+                code: nom::error::ErrorKind::Fail,
+            })
+        })?;
 
-    Ok(Enode {
-        node_id: node_id.to_owned(),
-        address: ip.parse()?,
-    })
+        Ok((remaining, node_id))
+    }
+
+    fn at(input: &str) -> IResult<&str, &str> {
+        tag("@")(input)
+    }
+
+    fn numbers<T: FromStr>(input: &str) -> IResult<&str, T> {
+        let mut parser = map_res(digit1, T::from_str);
+        parser(input)
+    }
+
+    fn ip(input: &str) -> IResult<&str, SocketAddr> {
+        let (remaining, (n1, _, n2, _, n3, _, n4, _, port)) = complete(sequence::tuple((
+            numbers::<u8>,
+            tag("."),
+            numbers::<u8>,
+            tag("."),
+            numbers::<u8>,
+            tag("."),
+            numbers::<u8>,
+            tag(":"),
+            numbers::<u16>,
+        )))(input)?;
+
+        Ok((
+            remaining,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(n1, n2, n3, n4)), port),
+        ))
+    }
+
+    pub(crate) fn parse(input: &str) -> Result<Enode> {
+        let (_remaining, (_, node_id, _, address)) =
+            complete(sequence::tuple((enode, node_id, at, ip)))(input)
+                .map_err(|e| eyre::eyre!("Failed to parse enode: {input:?}. nom error: {e:?}"))?;
+
+        Ok(Enode { node_id, address })
+    }
 }
 
 #[cfg(test)]
 mod enode_test {
+    use super::*;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-
-    use super::{parse, Enode};
 
     #[test]
     fn parse_enode() {
         let enode_str = "enode://de9a20da2b93c827105c69b93537c95e602390d618ccb45a6c05bedcc1862751d661614db8871a72cd38505e192d02e59ec08fa7298af4dd035862b4d746c504@216.128.3.159:30404";
         let enode = Enode {
-            node_id: String::from("de9a20da2b93c827105c69b93537c95e602390d618ccb45a6c05bedcc1862751d661614db8871a72cd38505e192d02e59ec08fa7298af4dd035862b4d746c504"),
+            node_id: NodeId::from_hex("de9a20da2b93c827105c69b93537c95e602390d618ccb45a6c05bedcc1862751d661614db8871a72cd38505e192d02e59ec08fa7298af4dd035862b4d746c504").expect("Failed to get node id"),
             address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(216,128,3,159)), 30404),
         };
 
-        let res = parse(enode_str).expect("Failed to parse enode");
+        let res = Enode::new(enode_str).expect("Failed to parse enode");
         assert_eq!(enode, res);
     }
 }
