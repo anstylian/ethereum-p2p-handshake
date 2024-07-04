@@ -18,13 +18,6 @@ const CONNECTION_TIMEOUT: u64 = 30;
 
 pub struct StreamMessage(BytesMut);
 
-#[allow(dead_code)]
-pub trait Recipient {
-    fn public_key(&self) -> &PublicKey;
-    fn id(&self) -> &NodeId;
-}
-
-#[allow(unused)]
 #[derive(Debug)]
 pub struct RecipientDefinition {
     public_key: PublicKey,
@@ -52,15 +45,12 @@ impl RecipientDefinition {
 
         Ok(ConnectedRecipient::new(self.public_key, self.id, stream))
     }
-}
 
-impl Recipient for ConnectedRecipient {
-    fn public_key(&self) -> &PublicKey {
-        &self.public_key
-    }
+    #[cfg(test)]
+    pub fn port(&mut self, port: u16) {
+        use std::net::{IpAddr, Ipv4Addr};
 
-    fn id(&self) -> &NodeId {
-        &self.id
+        self.address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
     }
 }
 
@@ -97,6 +87,24 @@ impl ConnectedRecipient {
     pub fn abort(&mut self) {
         self.read_task.abort();
         self.write_task.abort();
+    }
+
+    pub async fn send(&self, buf: BytesMut) -> Result<()> {
+        self.tx.send(StreamMessage(buf))?;
+        Ok(())
+    }
+
+    pub(crate) async fn recv(&mut self) -> Option<BytesMut> {
+        // Ok(self.rx.recv().await?.0)
+        self.rx.recv().await.map(|m| m.0)
+    }
+
+    pub fn public_key(&self) -> &PublicKey {
+        &self.public_key
+    }
+
+    pub fn id(&self) -> &NodeId {
+        &self.id
     }
 }
 // TODO: reading packages needs refactor. There are possible errors
@@ -204,29 +212,29 @@ impl TryFrom<super::initiator::Initiator> for RecipientDefinition {
     }
 }
 
-#[cfg(test)]
-pub struct TestRecipient {
-    public_key: PublicKey,
-    id: NodeId,
-}
-
-#[cfg(test)]
-impl TestRecipient {
-    pub fn new(definition: RecipientDefinition) -> Self {
-        Self {
-            public_key: definition.public_key,
-            id: definition.id,
-        }
-    }
-}
-
-#[cfg(test)]
-impl Recipient for TestRecipient {
-    fn public_key(&self) -> &PublicKey {
-        &self.public_key
-    }
-
-    fn id(&self) -> &NodeId {
-        &self.id
-    }
-}
+// #[cfg(test)]
+// pub struct TestRecipient {
+//     public_key: PublicKey,
+//     id: NodeId,
+// }
+//
+// #[cfg(test)]
+// impl TestRecipient {
+//     pub fn new(definition: RecipientDefinition) -> Self {
+//         Self {
+//             public_key: definition.public_key,
+//             id: definition.id,
+//         }
+//     }
+// }
+//
+// #[cfg(test)]
+// impl Recipient for TestRecipient {
+//     fn public_key(&self) -> &PublicKey {
+//         &self.public_key
+//     }
+//
+//     fn id(&self) -> &NodeId {
+//         &self.id
+//     }
+// }

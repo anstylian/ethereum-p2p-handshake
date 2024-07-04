@@ -1,20 +1,20 @@
-use alloy_primitives::B256;
 use eyre::Result;
 use rand::Rng;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
 
 use crate::utils::secrets::generate_restorable_secret;
+use crate::utils::Nonce;
 
 const NODE_KEY: &str = "eth-node-key";
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Initiator {
-    pub(crate) secret_key: SecretKey,
-    pub(crate) public_key: PublicKey,
-    pub(crate) ephemeral_secret_key: SecretKey,
-    pub(crate) ephemeral_public_key: PublicKey,
-    pub(crate) nonce: B256,
+    secret_key: SecretKey,
+    public_key: PublicKey,
+    ephemeral_secret_key: SecretKey,
+    ephemeral_public_key: PublicKey,
+    nonce: Nonce,
 }
 
 impl Initiator {
@@ -27,7 +27,7 @@ impl Initiator {
     fn new_inner<R: Rng>(secret_key: SecretKey, random_generator: &mut R) -> Self {
         let ephemeral_secret_key = SecretKey::new(random_generator);
         let secp = Secp256k1::new();
-        let nonce = B256::new(random_generator.gen::<[u8; 32]>());
+        let nonce = Nonce::new(random_generator.gen::<[u8; 32]>());
 
         Self {
             secret_key,
@@ -54,5 +54,21 @@ impl Initiator {
         let id = pk2id(&self.public_key);
 
         format!("enode://{}@127.0.0.1:40404", id).as_str().parse()
+    }
+
+    pub fn secret_key(&self) -> &SecretKey {
+        &self.secret_key
+    }
+
+    pub fn nonce(&self) -> &Nonce {
+        &self.nonce
+    }
+
+    pub fn ephemeral_secret_key(&self) -> &SecretKey {
+        &self.ephemeral_secret_key
+    }
+
+    pub fn public_key(&self) -> &PublicKey {
+        &self.public_key
     }
 }

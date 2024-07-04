@@ -7,10 +7,15 @@ use argh::FromArgs;
 use eyre::Result;
 use tracing::{debug, info, trace};
 
-use crate::ecies::parties::{initiator::Initiator, recipient::RecipientDefinition};
+use crate::{
+    connection::Connection,
+    ecies::parties::{initiator::Initiator, recipient::RecipientDefinition},
+};
 
+mod connection;
 mod ecies;
 mod enode;
+mod messages;
 mod utils;
 
 #[derive(FromArgs, Debug)]
@@ -39,15 +44,18 @@ async fn main() -> Result<()> {
 
     debug!("Parsed args: {enode:?}");
 
-    let initiator = Initiator::new(random_generator).await;
+    let initiator = Initiator::new(random_generator).await?;
     trace!("Initator: {initiator:?}");
 
     let recipient = RecipientDefinition::new(enode.parse()?)?;
     trace!("Recipient: {recipient:?}");
 
-    let mut recipient = recipient.connect().await?;
+    let recipient = recipient.connect().await?;
 
-    recipient.abort();
+    let mut connection = Connection::new(&initiator, recipient);
+    connection.send_auth_message(random_generator).await?;
+
+    connection.abort();
 
     Ok(())
 }
@@ -56,9 +64,9 @@ async fn main() -> Result<()> {
 mod tests {
     use rand::{Rng, SeedableRng};
 
-    use crate::ecies::parties::{
-        initiator::Initiator,
-        recipient::{RecipientDefinition, TestRecipient},
+    use crate::{
+        connection::Connection,
+        ecies::parties::{initiator::Initiator, recipient::RecipientDefinition},
     };
 
     pub fn static_random_generator() -> impl Rng {
@@ -67,24 +75,51 @@ mod tests {
 
     #[tokio::test]
     async fn test_drive() {
+        if std::env::var_os("RUST_LOG").is_none() {
+            std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=trace")
+        }
+        tracing_subscriber::fmt::init();
+
         let random_generator = &mut static_random_generator();
 
         let file1 = "./testing_files/secret1";
         let initiator = Initiator::test_new(random_generator, file1)
             .await
             .expect("Failed to create initator 1");
-        let recipient: RecipientDefinition = initiator
-            .try_into()
-            .expect("Failed to create recipient from intiator");
-        let _test_recipient_1 = TestRecipient::new(recipient);
 
         let file2 = "./testing_files/secret2";
+
+        // This is just to create a valid public key
         let initiator2 = Initiator::test_new(random_generator, file2)
             .await
             .expect("Failed to create initator 2");
-        let recipient2: RecipientDefinition = initiator2
+        let mut recipient: RecipientDefinition = initiator2
+            .clone()
             .try_into()
             .expect("Failed to create recipient from intiator");
-        let _test_recipient_2 = TestRecipient::new(recipient2);
+        recipient.port(8080);
+        let connected_recipient = recipient.connect().await.expect("Failed to connect");
+
+        // this is the reverse side so we can decrypt the messeges
+        let mut recipient_other: RecipientDefinition = initiator
+            .clone()
+            .try_into()
+            .expect("Failed to create recipient for the other side");
+        recipient_other.port(8081);
+        let connected_recipient_other = recipient_other.connect().await.expect("Failed to connect");
+
+        let mut connection = Connection::new(&initiator, connected_recipient);
+        let mut auth_message = connection
+            .generate_auth_message(random_generator)
+            .expect("Failed to create auth message");
+
+        println!("Encrypted messege: {:02x}", auth_message);
+
+        let mut connection_other = Connection::new(&initiator2, connected_recipient_other);
+        connection_other
+            .decrypt_message_auth(&mut auth_message)
+            .expect("Failed to decrypt auth");
+
+        // connection.generate_auth_message(random_generator);
     }
 }
