@@ -1,4 +1,3 @@
-use crate::utils::NodeId;
 use alloy_primitives::{B128, B256};
 use eyre::Result;
 use secp256k1::{PublicKey, SecretKey};
@@ -6,6 +5,7 @@ use secp256k1::{PublicKey, SecretKey};
 use crate::utils::{aes_decrypt, ecdh_x, hmac_sha256, id2pk, key_material};
 
 pub mod auth;
+pub mod auth_ack;
 
 pub struct MessageDecryptor<'a> {
     // Message size after auth-data (2 bytes)
@@ -73,67 +73,3 @@ impl<'a> MessageDecryptor<'a> {
         decrypted_data
     }
 }
-
-// pub struct Message<'a> {
-//     public_key: &'a [u8; 65],
-//     iv: B128,
-//     message: &'a [u8],
-//     tag: B256,
-// }
-//
-// impl<'a> Message<'a> {
-//     fn new(
-//         message: &'a mut [u8],
-//         recipient_public_key: PublicKey,
-//         random_generator: &mut impl Rng,
-//     ) -> Result<Self> {
-//         let total_size: u16 = u16::try_from(
-//             secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE  // Public key size
-//                 + 16                                            // Size of iv
-//                 + message.len()                                 // Unencrypted message
-//                 + 32, // Tag Size
-//         )
-//         .unwrap();
-//
-//         let secret_key = SecretKey::new(random_generator);
-//         let shared_secret = ecdh_x(&recipient_public_key, &secret_key);
-//
-//         let (encryption_key, authentication_key) = key_material(shared_secret)?;
-//
-//         let iv: B128 = random_generator.gen::<[u8; 16]>().into();
-//
-//         // encrypt message
-//         let encrypted_message: &mut [u8] = message;
-//         aes_encrypt(encryption_key, &mut encrypted_message[..], iv);
-//         // from here and on message is encrypted
-//
-//         let d = hmac_sha256(
-//             &authentication_key.0,
-//             &[&iv.0, &encrypted_message],
-//             &total_size.to_be_bytes(),
-//         );
-//
-//         Ok(Self {
-//             public_key: &PublicKey::from_secret_key(SECP256K1, &secret_key)
-//                 .serialize_uncompressed(),
-//             iv,
-//             message: encrypted_message,
-//             tag: d,
-//         })
-//     }
-// }
-//
-// fn key_material(shared_secret: B256) -> Result<(B128, B256)> {
-//     let mut key = [0u8; 32];
-//     kdf(shared_secret, &mut key)?;
-//
-//     let encryption_key: B128 = B128::from_slice(&key[..16]);
-//     let authentication_key = B256::from(Sha256::digest(&key[16..32]).as_ref());
-//
-//     Ok((encryption_key, authentication_key))
-// }
-//
-// fn aes_encrypt(encryption_key: B128, message: &mut [u8], iv: B128) {
-//     let mut cipher = Ctr64BE::<Aes128>::new(&encryption_key.0.into(), &iv.0.into());
-//     cipher.apply_keystream(message);
-// }

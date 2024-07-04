@@ -570,6 +570,7 @@ dependencies = [
  "concat-kdf",
  "ctr",
  "eyre",
+ "hex",
  "hmac",
  "nom",
  "rand",

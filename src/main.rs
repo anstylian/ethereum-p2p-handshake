@@ -29,7 +29,7 @@ struct EthereumHandshake {
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=debug")
+        std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=trace")
     }
     tracing_subscriber::fmt::init();
 
@@ -54,6 +54,7 @@ async fn main() -> Result<()> {
 
     let mut connection = Connection::new(&initiator, recipient);
     connection.send_auth_message(random_generator).await?;
+    connection.receive_auth_ack().await?;
 
     connection.abort();
 

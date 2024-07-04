@@ -1,11 +1,14 @@
 use alloy_primitives::B128;
+use alloy_rlp::Decodable;
 use bytes::{BufMut, Bytes, BytesMut};
-use eyre::Result;
+use eyre::{eyre, Result};
 use rand::Rng;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use tracing::{instrument, trace};
 
-use crate::utils::{aes_encrypt, hmac_sha256, key_material};
+use crate::messages::auth_ack::AuthAck;
+use crate::messages::MessageDecryptor;
+use crate::utils::{aes_encrypt, hmac_sha256, key_material, pk2id};
 use crate::{
     ecies::parties::{initiator::Initiator, recipient::ConnectedRecipient},
     messages::auth::AuthBody,
@@ -18,7 +21,7 @@ pub struct Connection<'a> {
     recipient: ConnectedRecipient,
 
     outbound_message: Option<Bytes>,
-    _inbound_message: Option<Bytes>,
+    inbound_message: Option<Bytes>,
 }
 
 impl<'a> Connection<'a> {
@@ -27,7 +30,7 @@ impl<'a> Connection<'a> {
             initiator,
             recipient,
             outbound_message: None,
-            _inbound_message: None,
+            inbound_message: None,
         }
     }
 
@@ -41,6 +44,22 @@ impl<'a> Connection<'a> {
         let buf = self.generate_auth_message(random_generator)?;
 
         self.recipient.send(buf).await?;
+
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    pub async fn receive_auth_ack(&mut self) -> Result<()> {
+        let mut msg = self
+            .recipient
+            .recv()
+            .await
+            .ok_or(eyre!("No message received"))?;
+
+        self.inbound_message = Some(Bytes::copy_from_slice(&msg[..]));
+        trace!("received auth ack {:02x}", msg);
+
+        self.read_auth_ack(&mut msg)?;
 
         Ok(())
     }
@@ -138,33 +157,32 @@ impl<'a> Connection<'a> {
         Ok(total_size)
     }
 
-    pub async fn receive_auth_ack(&mut self) -> Result<()> {
-        let Some(mut msg) = self.recipient.recv().await else {
-            eyre::bail!("No message found to recv");
-        };
-
-        self._inbound_message = Some(Bytes::copy_from_slice(&msg[..]));
-        self.read_auth_ack(&mut msg)?;
-
-        Ok(())
-    }
-
     // auth-ack -> E(remote-pubk, remote-ephemeral-pubk || nonce || 0x0)
-    pub fn read_auth_ack(&mut self, _message: &mut BytesMut) -> Result<()> {
-        // let decrypt_message = self.decrypt_message(message)?;
+    pub fn read_auth_ack(&mut self, message: &mut BytesMut) -> Result<AuthAck> {
+        let decrypt_message = self.decrypt_message(message)?;
+        trace!("decrypted AuthAck: {decrypt_message:02x?}");
 
-        Ok(())
+        let auth_ack = AuthAck::decode(&mut decrypt_message.as_ref())?;
+        trace!("received auth ack {:02x?}", auth_ack);
+
+        Ok(auth_ack)
     }
 
-    #[cfg(test)]
-    pub fn decrypt_message_auth(&mut self, message: &mut BytesMut) -> Result<()> {
-        use crate::messages::MessageDecryptor;
-
+    fn decrypt_message(&self, message: &'a mut [u8]) -> Result<&'a mut [u8]> {
         let unencrypted_auth = MessageDecryptor::new(message)?;
         let (encryption_key, authentication_key) =
             unencrypted_auth.derive_keys(self.initiator.secret_key())?;
         unencrypted_auth.check_integrity(authentication_key)?;
-        unencrypted_auth.decrypt(encryption_key);
-        Ok(())
+        let m = unencrypted_auth.decrypt(encryption_key);
+
+        Ok(m)
+    }
+
+    #[cfg(test)]
+    pub fn decrypt_message_auth(&mut self, message: &'a mut BytesMut) -> Result<&'a mut [u8]> {
+        let auth_message = self.decrypt_message(message)?;
+
+        Ok(auth_message)
+        // Ok(auth_message)
     }
 }

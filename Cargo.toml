@@ -24,6 +24,7 @@ tokio = { version = "1.38.0", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 alloy-rlp = { version = "0.3.7", features = [ "derive", "arrayvec" ]}
+hex = "0.4.3"
 
 [dev-dependencies]
 rand_chacha = "0.3.1"
