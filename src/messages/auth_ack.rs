@@ -17,4 +17,12 @@ impl AuthAck {
             protocol_version: PROTOCOL_VERSION.try_into()?,
         })
     }
+
+    pub fn nonce(&self) -> [u8; 32] {
+        self.nonce
+    }
+
+    pub fn id(&self) -> [u8; 64] {
+        self.id
+    }
 }

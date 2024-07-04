@@ -1,5 +1,6 @@
+use alloy_primitives::B256;
 use bytes::{BufMut, BytesMut};
-use eyre::Result;
+use eyre::{eyre, Result};
 use secp256k1::PublicKey;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -62,6 +63,8 @@ pub struct ConnectedRecipient {
     rx: UnboundedReceiver<StreamMessage>,
     read_task: tokio::task::JoinHandle<Result<()>>,
     write_task: tokio::task::JoinHandle<Result<()>>,
+    ephemeral_public_key: Option<PublicKey>,
+    nonce: Option<B256>,
 }
 
 impl ConnectedRecipient {
@@ -81,6 +84,8 @@ impl ConnectedRecipient {
             rx: reader_rx,
             read_task,
             write_task,
+            ephemeral_public_key: None,
+            nonce: None,
         }
     }
 
@@ -106,6 +111,26 @@ impl ConnectedRecipient {
     pub fn id(&self) -> &NodeId {
         &self.id
     }
+
+    pub fn ephemeral_public_key(&self) -> Result<&PublicKey> {
+        self.ephemeral_public_key
+            .as_ref()
+            .ok_or(eyre!("Recipient public key is not initialized"))
+    }
+
+    pub fn nonce(&self) -> Result<&B256> {
+        self.nonce
+            .as_ref()
+            .ok_or(eyre!("Recipient public key is not initialized"))
+    }
+
+    pub fn set_nonce(&mut self, nonce: B256) {
+        self.nonce = Some(nonce);
+    }
+
+    pub fn set_ephemeral_public_key(&mut self, public_key: PublicKey) {
+        self.ephemeral_public_key = Some(public_key);
+    }
 }
 // TODO: reading packages needs refactor. There are possible errors
 // TODO: close the streams
@@ -125,6 +150,7 @@ pub async fn stream_reader(
             match reader.try_read_buf(&mut buf) {
                 Ok(0) => {
                     error!("TCP stream closed"); // TODO: remove this
+                    std::process::exit(-1);
                 }
                 Ok(n) => {
                     warn!("-->Bytes read {n}");

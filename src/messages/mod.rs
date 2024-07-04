@@ -6,6 +6,8 @@ use crate::utils::{aes_decrypt, ecdh_x, hmac_sha256, id2pk, key_material};
 
 pub mod auth;
 pub mod auth_ack;
+pub mod hello;
+pub mod other;
 
 pub struct MessageDecryptor<'a> {
     // Message size after auth-data (2 bytes)

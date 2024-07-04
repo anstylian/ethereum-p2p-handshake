@@ -15,6 +15,7 @@ use crate::{
 mod connection;
 mod ecies;
 mod enode;
+mod mac;
 mod messages;
 mod utils;
 
@@ -55,6 +56,17 @@ async fn main() -> Result<()> {
     let mut connection = Connection::new(&initiator, recipient);
     connection.send_auth_message(random_generator).await?;
     connection.receive_auth_ack().await?;
+    connection.receive().await?;
+    connection.sent_hello().await?;
+    connection.receive().await?;
+    println!("---->send PING");
+    connection.sent_ping().await?;
+    println!("---->recv PONG");
+    connection.receive().await?;
+    println!("---->send PING");
+    connection.sent_ping().await?;
+    println!("---->recv PONG");
+    connection.receive().await?;
 
     connection.abort();
 

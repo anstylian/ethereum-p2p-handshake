@@ -1,14 +1,24 @@
-use alloy_primitives::B128;
-use alloy_rlp::Decodable;
+use std::io::BufRead;
+
+use aes::Aes256;
+use alloy_primitives::{B128, B256};
+use alloy_rlp::{Decodable, Encodable};
+use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use bytes::{BufMut, Bytes, BytesMut};
+use cipher::{KeyIvInit, StreamCipher};
+use ctr::Ctr64BE;
 use eyre::{eyre, Result};
 use rand::Rng;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
+use sha2::Digest;
 use tracing::{instrument, trace};
 
+use crate::mac::MAC;
 use crate::messages::auth_ack::AuthAck;
+use crate::messages::hello::{Capability, Hello};
+use crate::messages::other::{Disconnect, Ping, Pong};
 use crate::messages::MessageDecryptor;
-use crate::utils::{aes_encrypt, hmac_sha256, key_material, pk2id};
+use crate::utils::{aes_encrypt, hmac_sha256, id2pk, key_material, pk2id};
 use crate::{
     ecies::parties::{initiator::Initiator, recipient::ConnectedRecipient},
     messages::auth::AuthBody,
@@ -22,6 +32,16 @@ pub struct Connection<'a> {
 
     outbound_message: Option<Bytes>,
     inbound_message: Option<Bytes>,
+
+    ephemeral_shared_secret: Option<B256>,
+
+    ingress_aes: Option<Ctr64BE<Aes256>>,
+    egress_aes: Option<Ctr64BE<Aes256>>,
+
+    ingress_mac: Option<MAC>,
+    egress_mac: Option<MAC>,
+
+    body_size: Option<usize>,
 }
 
 impl<'a> Connection<'a> {
@@ -31,6 +51,12 @@ impl<'a> Connection<'a> {
             recipient,
             outbound_message: None,
             inbound_message: None,
+            ephemeral_shared_secret: None,
+            ingress_aes: None,
+            egress_aes: None,
+            ingress_mac: None,
+            egress_mac: None,
+            body_size: None,
         }
     }
 
@@ -43,6 +69,7 @@ impl<'a> Connection<'a> {
     pub async fn send_auth_message(&mut self, random_generator: &mut impl Rng) -> Result<()> {
         let buf = self.generate_auth_message(random_generator)?;
 
+        self.outbound_message = Some(Bytes::copy_from_slice(&buf));
         self.recipient.send(buf).await?;
 
         Ok(())
@@ -83,8 +110,6 @@ impl<'a> Connection<'a> {
         // buf.put_slice(&len.to_be_bytes());
 
         // buf.unsplit(encrypted);
-
-        self.outbound_message = Some(Bytes::copy_from_slice(&encrypted));
 
         Ok(encrypted)
     }
@@ -165,6 +190,17 @@ impl<'a> Connection<'a> {
         let auth_ack = AuthAck::decode(&mut decrypt_message.as_ref())?;
         trace!("received auth ack {:02x?}", auth_ack);
 
+        self.recipient.set_nonce(auth_ack.nonce().into());
+
+        self.recipient
+            .set_ephemeral_public_key(id2pk(auth_ack.id().into())?);
+
+        self.ephemeral_shared_secret = Some(ecdh_x(
+            self.recipient.ephemeral_public_key()?,
+            &self.initiator.ephemeral_secret_key(),
+        ));
+
+        self.setup_frame(false)?;
         Ok(auth_ack)
     }
 
@@ -178,11 +214,261 @@ impl<'a> Connection<'a> {
         Ok(m)
     }
 
+    pub async fn receive(&mut self) -> Result<()> {
+        let mut msg = self
+            .recipient
+            .recv()
+            .await
+            .ok_or(eyre!("No message received"))?;
+
+        self.inbound_message = Some(Bytes::copy_from_slice(&msg[..]));
+        trace!("received auth ack {:02x}", msg);
+
+        self.read_message(&mut msg)?;
+        Ok(())
+    }
+
+    fn read_message(&mut self, message: &mut BytesMut) -> Result<()> {
+        // read header
+        let frame = self.read_frame(message)?;
+        trace!("{:02x?}", frame);
+
+        let (mut message_id, mut message) = frame.split_at(1);
+
+        let message_id: u8 = u8::decode(&mut message_id)?;
+        trace!("message_id: {:?}", message_id);
+
+        match message_id {
+            0 => {
+                trace!("Hello: {message:02x?}");
+                let hello: Hello = Hello::decode(&mut message)?;
+                trace!("Hello message from target node: {:?}", hello);
+            }
+            1 => {
+                trace!("Disconnect: {message:02x?}");
+                let disconnect = Disconnect::decode(&mut message)?;
+                trace!("Disconnect: {:?}", disconnect);
+            }
+            2 => {
+                trace!("Ping: {message:02x?}");
+                let ping = Ping::decode(&mut message)?;
+                trace!("Ping: {:?}", ping);
+            }
+            3 => {
+                trace!("Pong: {message:02x?}");
+                let pong = Pong::decode(&mut message)?;
+                trace!("Pong: {:?}", pong);
+            }
+            _ => todo!(),
+        }
+
+        println!("remaining message: {:02x?}", message);
+
+        Ok(())
+    }
+
+    pub async fn sent_hello(&mut self) -> Result<()> {
+        let mut hello = self.create_hello();
+        let buf = self.write_frame(hello.as_mut());
+
+        self.recipient.send(buf).await?;
+
+        Ok(())
+    }
+
+    pub async fn sent_ping(&mut self) -> Result<()> {
+        let mut ping = self.create_ping();
+        let buf = self.write_frame(ping.as_mut());
+
+        self.recipient.send(buf).await?;
+
+        Ok(())
+    }
+
+    fn create_hello(&self) -> BytesMut {
+        let mut hello = BytesMut::new();
+        let capabilities = vec![Capability::new("eth".to_string(), 68)];
+        Hello::new(
+            "test-client".to_string(),
+            capabilities,
+            0,
+            *pk2id(self.initiator.public_key()),
+        )
+        .encode(&mut hello);
+
+        hello
+    }
+
+    fn create_ping(&self) -> BytesMut {
+        let mut ping = BytesMut::new();
+        Ping {}.encode(&mut ping);
+
+        ping
+    }
+
+    fn write_frame(&mut self, message: &mut [u8]) -> BytesMut {
+        let mut out = BytesMut::new();
+        let mut buf = [0u8; 8];
+
+        BigEndian::write_uint(&mut buf, message.len() as u64, 3);
+        let mut header = [0u8; 16];
+        header[..3].copy_from_slice(&buf[..3]);
+        header[3..6].copy_from_slice(&[194, 128, 128]);
+
+        self.egress_aes
+            .as_mut()
+            .unwrap()
+            .apply_keystream(&mut header);
+        self.egress_mac
+            .as_mut()
+            .unwrap()
+            .update_header(&B128::from_slice(&header));
+        let tag = self.egress_mac.as_mut().unwrap().digest();
+
+        out.reserve(32);
+        out.extend_from_slice(&header[..]);
+        out.extend_from_slice(tag.as_slice());
+
+        let len = if message.len() % 16 == 0 {
+            message.len()
+        } else {
+            (message.len() / 16 + 1) * 16
+        };
+        let old_len = out.len();
+        out.resize(old_len + len, 0);
+
+        let encrypted = &mut out[old_len..old_len + len];
+        encrypted[..message.len()].copy_from_slice(message);
+
+        self.egress_aes.as_mut().unwrap().apply_keystream(encrypted);
+        self.egress_mac.as_mut().unwrap().update_body(encrypted); // TODO: check this
+        let tag = self.egress_mac.as_mut().unwrap().digest();
+
+        out.extend_from_slice(tag.as_slice());
+
+        out
+    }
+
+    fn read_frame(&mut self, buf: &mut [u8]) -> Result<Vec<u8>> {
+        if buf.len() < 32 {
+            return Err(eyre::eyre!(
+                "Header is too small. Needs at lease 32 bytes for header + mac"
+            ));
+        }
+
+        let (header, rest) = buf.split_at_mut(16);
+        let mut header: B128 = B128::from_slice(&header);
+
+        let (mac_bytes, rest) = rest.split_at_mut(16);
+        let mac = B128::from_slice(&mac_bytes[..]);
+
+        self.ingress_mac.as_mut().unwrap().update_header(&header);
+        let current_mac = self.ingress_mac.as_mut().unwrap().digest();
+        if current_mac != mac {
+            return Err(eyre!("Header MAC check failed"));
+        }
+
+        self.ingress_aes
+            .as_mut()
+            .unwrap()
+            .apply_keystream(header.as_mut_slice());
+        if header.as_slice().len() < 3 {
+            return Err(eyre!("Invalid header"));
+        }
+
+        let mut frame_size = (BigEndian::read_uint(header.as_ref(), 3) + 16) as usize; // frame size + 16 bytes Frame MAC
+        let padding = frame_size % 16;
+        if padding > 0 {
+            frame_size += 16 - padding;
+        }
+        trace!("Body size: {:?}", frame_size);
+
+        let (frame, _rest) = rest.split_at_mut(frame_size as usize);
+
+        let (frame, frame_mac) = frame.split_at_mut(frame_size.checked_sub(16).unwrap());
+        let frame_mac = B128::from_slice(frame_mac.as_ref());
+        self.ingress_mac.as_mut().unwrap().update_body(frame);
+        let current_mac = self.ingress_mac.as_mut().unwrap().digest();
+        if current_mac != frame_mac {
+            return Err(eyre!("Frame MAC check failed"));
+        }
+
+        self.ingress_aes.as_mut().unwrap().apply_keystream(frame);
+
+        Ok(frame.to_vec())
+    }
+
     #[cfg(test)]
     pub fn decrypt_message_auth(&mut self, message: &'a mut BytesMut) -> Result<&'a mut [u8]> {
         let auth_message = self.decrypt_message(message)?;
 
         Ok(auth_message)
         // Ok(auth_message)
+    }
+
+    fn setup_frame(&mut self, incoming: bool) -> Result<()> {
+        let mut hasher = sha3::Keccak256::new();
+        if incoming {
+            for e in [self.initiator.nonce(), self.recipient.nonce()?] {
+                hasher.update(e);
+            }
+        } else {
+            for e in [self.recipient.nonce()?, self.initiator.nonce()] {
+                hasher.update(e);
+            }
+        }
+
+        let h_nonce = alloy_primitives::B256::from(hasher.finalize().as_ref());
+
+        let iv = B128::default();
+        let shared_secret: B256 = {
+            let mut hasher = sha3::Keccak256::new();
+            hasher.update(&self.ephemeral_shared_secret.unwrap().0);
+            hasher.update(h_nonce.0.as_ref());
+            B256::from(hasher.finalize().as_ref())
+        };
+
+        let aes_secret: B256 = {
+            let mut hasher = sha3::Keccak256::new();
+            hasher.update(self.ephemeral_shared_secret.unwrap().0.as_ref());
+            hasher.update(shared_secret.0.as_ref());
+            B256::from(hasher.finalize().as_ref())
+        };
+
+        self.ingress_aes = Some(ctr::Ctr64BE::<aes::Aes256>::new(
+            (&aes_secret.0).into(),
+            (&iv.0).into(),
+        ));
+        self.egress_aes = Some(ctr::Ctr64BE::<aes::Aes256>::new(
+            (&aes_secret.0).into(),
+            (&iv.0).into(),
+        ));
+
+        let mac_secret: B256 = {
+            let mut hasher = sha3::Keccak256::new();
+            hasher.update(self.ephemeral_shared_secret.unwrap().0.as_ref());
+            hasher.update(aes_secret.0.as_ref());
+            B256::from(hasher.finalize().as_ref())
+        };
+        self.ingress_mac = Some(crate::mac::MAC::new(mac_secret));
+        self.ingress_mac
+            .as_mut()
+            .unwrap()
+            .update((mac_secret ^ *self.initiator.nonce()).as_ref());
+        self.ingress_mac
+            .as_mut()
+            .unwrap()
+            .update(self.inbound_message.as_ref().unwrap());
+        self.egress_mac = Some(MAC::new(mac_secret));
+        self.egress_mac
+            .as_mut()
+            .unwrap()
+            .update((mac_secret ^ *self.recipient.nonce().unwrap()).as_ref());
+        self.egress_mac
+            .as_mut()
+            .unwrap()
+            .update(self.outbound_message.as_ref().unwrap());
+
+        Ok(())
     }
 }

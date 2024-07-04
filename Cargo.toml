@@ -26,5 +26,14 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 alloy-rlp = { version = "0.3.7", features = [ "derive", "arrayvec" ]}
 hex = "0.4.3"
 
+block-cipher = "0.99.99"
+cipher = { version = "0.4.4", features = ["block-padding"]}
+digest = "0.10.7"
+generic-array = "1.0.0"
+sha3 = "0.10.8"
+typenum = "1.17.0"
+block-padding = "0.3.3"
+byteorder = "1.5.0"
+
 [dev-dependencies]
 rand_chacha = "0.3.1"
