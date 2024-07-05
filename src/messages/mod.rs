@@ -1,4 +1,5 @@
 use alloy_primitives::{B128, B256};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use eyre::Result;
 use secp256k1::{PublicKey, SecretKey};
 
@@ -7,7 +8,17 @@ use crate::utils::{aes_decrypt, ecdh_x, hmac_sha256, key_material};
 pub mod auth;
 pub mod auth_ack;
 pub mod hello;
-pub mod other;
+
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+pub struct Disconnect {
+    pub reason: usize,
+}
+
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+pub struct Ping {}
+
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+pub struct Pong {}
 
 pub struct MessageDecryptor<'a> {
     // Message size after auth-data (2 bytes)

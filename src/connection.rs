@@ -14,8 +14,8 @@ use tracing::{instrument, trace};
 use crate::mac::Mac;
 use crate::messages::auth_ack::AuthAck;
 use crate::messages::hello::{Capability, Hello};
-use crate::messages::other::{Disconnect, Ping, Pong};
 use crate::messages::MessageDecryptor;
+use crate::messages::{Disconnect, Ping, Pong};
 use crate::utils::{aes_encrypt, hmac_sha256, id2pk, key_material, pk2id};
 use crate::{
     ecies::parties::{initiator::Initiator, recipient::ConnectedRecipient},
