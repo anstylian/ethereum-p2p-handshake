@@ -108,10 +108,6 @@ impl ConnectedRecipient {
         &self.public_key
     }
 
-    pub fn id(&self) -> &NodeId {
-        &self.id
-    }
-
     pub fn ephemeral_public_key(&self) -> Result<&PublicKey> {
         self.ephemeral_public_key
             .as_ref()

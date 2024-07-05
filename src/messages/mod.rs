@@ -2,7 +2,7 @@ use alloy_primitives::{B128, B256};
 use eyre::Result;
 use secp256k1::{PublicKey, SecretKey};
 
-use crate::utils::{aes_decrypt, ecdh_x, hmac_sha256, id2pk, key_material};
+use crate::utils::{aes_decrypt, ecdh_x, hmac_sha256, key_material};
 
 pub mod auth;
 pub mod auth_ack;

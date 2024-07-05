@@ -1,10 +1,8 @@
-use std::io::BufRead;
-
 use aes::Aes256;
 use alloy_primitives::{B128, B256};
 use alloy_rlp::{Decodable, Encodable};
-use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
-use bytes::{BufMut, Bytes, BytesMut};
+use byteorder::{BigEndian, ByteOrder};
+use bytes::{Bytes, BytesMut};
 use cipher::{KeyIvInit, StreamCipher};
 use ctr::Ctr64BE;
 use eyre::{eyre, Result};
@@ -13,7 +11,7 @@ use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use sha2::Digest;
 use tracing::{instrument, trace};
 
-use crate::mac::MAC;
+use crate::mac::Mac;
 use crate::messages::auth_ack::AuthAck;
 use crate::messages::hello::{Capability, Hello};
 use crate::messages::other::{Disconnect, Ping, Pong};
@@ -38,10 +36,8 @@ pub struct Connection<'a> {
     ingress_aes: Option<Ctr64BE<Aes256>>,
     egress_aes: Option<Ctr64BE<Aes256>>,
 
-    ingress_mac: Option<MAC>,
-    egress_mac: Option<MAC>,
-
-    body_size: Option<usize>,
+    ingress_mac: Option<Mac>,
+    egress_mac: Option<Mac>,
 }
 
 impl<'a> Connection<'a> {
@@ -56,7 +52,6 @@ impl<'a> Connection<'a> {
             egress_aes: None,
             ingress_mac: None,
             egress_mac: None,
-            body_size: None,
         }
     }
 
@@ -169,7 +164,7 @@ impl<'a> Connection<'a> {
         let public_key =
             &PublicKey::from_secret_key(SECP256K1, &secret_key).serialize_uncompressed();
 
-        out.extend_from_slice(&u16::try_from(total_size)?.to_be_bytes());
+        out.extend_from_slice(&total_size.to_be_bytes());
         out.extend_from_slice(public_key);
         out.extend_from_slice(iv.as_slice());
         out.extend_from_slice(encrypted_message);
@@ -197,7 +192,7 @@ impl<'a> Connection<'a> {
 
         self.ephemeral_shared_secret = Some(ecdh_x(
             self.recipient.ephemeral_public_key()?,
-            &self.initiator.ephemeral_secret_key(),
+            self.initiator.ephemeral_secret_key(),
         ));
 
         self.setup_frame(false)?;
@@ -357,10 +352,10 @@ impl<'a> Connection<'a> {
         }
 
         let (header, rest) = buf.split_at_mut(16);
-        let mut header: B128 = B128::from_slice(&header);
+        let mut header: B128 = B128::from_slice(header);
 
         let (mac_bytes, rest) = rest.split_at_mut(16);
-        let mac = B128::from_slice(&mac_bytes[..]);
+        let mac = B128::from_slice(mac_bytes);
 
         self.ingress_mac.as_mut().unwrap().update_header(&header);
         let current_mac = self.ingress_mac.as_mut().unwrap().digest();
@@ -386,7 +381,7 @@ impl<'a> Connection<'a> {
         let (frame, _rest) = rest.split_at_mut(frame_size as usize);
 
         let (frame, frame_mac) = frame.split_at_mut(frame_size.checked_sub(16).unwrap());
-        let frame_mac = B128::from_slice(frame_mac.as_ref());
+        let frame_mac = B128::from_slice(frame_mac);
         self.ingress_mac.as_mut().unwrap().update_body(frame);
         let current_mac = self.ingress_mac.as_mut().unwrap().digest();
         if current_mac != frame_mac {
@@ -423,7 +418,7 @@ impl<'a> Connection<'a> {
         let iv = B128::default();
         let shared_secret: B256 = {
             let mut hasher = sha3::Keccak256::new();
-            hasher.update(&self.ephemeral_shared_secret.unwrap().0);
+            hasher.update(self.ephemeral_shared_secret.unwrap().0);
             hasher.update(h_nonce.0.as_ref());
             B256::from(hasher.finalize().as_ref())
         };
@@ -450,7 +445,7 @@ impl<'a> Connection<'a> {
             hasher.update(aes_secret.0.as_ref());
             B256::from(hasher.finalize().as_ref())
         };
-        self.ingress_mac = Some(crate::mac::MAC::new(mac_secret));
+        self.ingress_mac = Some(crate::mac::Mac::new(mac_secret));
         self.ingress_mac
             .as_mut()
             .unwrap()
@@ -459,7 +454,7 @@ impl<'a> Connection<'a> {
             .as_mut()
             .unwrap()
             .update(self.inbound_message.as_ref().unwrap());
-        self.egress_mac = Some(MAC::new(mac_secret));
+        self.egress_mac = Some(Mac::new(mac_secret));
         self.egress_mac
             .as_mut()
             .unwrap()

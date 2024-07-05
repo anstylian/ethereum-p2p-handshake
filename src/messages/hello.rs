@@ -1,4 +1,4 @@
-use crate::utils::{NodeId, PROTOCOL_VERSION};
+use crate::utils::PROTOCOL_VERSION;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 
 #[derive(Debug, RlpEncodable, RlpDecodable)]
