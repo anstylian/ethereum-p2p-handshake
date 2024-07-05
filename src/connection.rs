@@ -18,8 +18,8 @@ use crate::messages::MessageDecryptor;
 use crate::messages::{Disconnect, Ping, Pong};
 use crate::utils::{aes_encrypt, hmac_sha256, id2pk, key_material, pk2id};
 use crate::{
-    ecies::parties::{initiator::Initiator, recipient::ConnectedRecipient},
     messages::auth::AuthBody,
+    parties::{initiator::Initiator, recipient::ConnectedRecipient},
     utils::ecdh_x,
 };
 

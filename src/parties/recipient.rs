@@ -12,7 +12,7 @@ use tokio::time::timeout;
 use tracing::{error, instrument, trace, warn};
 
 use crate::enode::Enode;
-use crate::utils::{id2pk, NodeId};
+use crate::utils::id2pk;
 
 /// Connection timeout in seconds
 const CONNECTION_TIMEOUT: u64 = 30;
@@ -22,7 +22,6 @@ pub struct StreamMessage(BytesMut);
 #[derive(Debug)]
 pub struct RecipientDefinition {
     public_key: PublicKey,
-    id: NodeId,
     address: SocketAddr,
 }
 
@@ -30,7 +29,6 @@ impl RecipientDefinition {
     pub fn new(enode: Enode) -> Result<Self> {
         Ok(Self {
             public_key: id2pk(enode.node_id())?,
-            id: enode.node_id(),
             address: enode.address(),
         })
     }
@@ -44,7 +42,7 @@ impl RecipientDefinition {
         )
         .await??;
 
-        Ok(ConnectedRecipient::new(self.public_key, self.id, stream))
+        Ok(ConnectedRecipient::new(self.public_key, stream))
     }
 
     #[cfg(test)]
@@ -55,10 +53,8 @@ impl RecipientDefinition {
     }
 }
 
-#[allow(unused)]
 pub struct ConnectedRecipient {
     public_key: PublicKey,
-    id: NodeId,
     tx: UnboundedSender<StreamMessage>,
     rx: UnboundedReceiver<StreamMessage>,
     read_task: tokio::task::JoinHandle<Result<()>>,
@@ -68,7 +64,7 @@ pub struct ConnectedRecipient {
 }
 
 impl ConnectedRecipient {
-    pub fn new(public_key: PublicKey, id: NodeId, stream: TcpStream) -> ConnectedRecipient {
+    pub fn new(public_key: PublicKey, stream: TcpStream) -> ConnectedRecipient {
         let (reader_tx, reader_rx) = mpsc::unbounded_channel();
         let (writer_tx, writer_rx) = mpsc::unbounded_channel();
 
@@ -79,7 +75,6 @@ impl ConnectedRecipient {
 
         Self {
             public_key,
-            id,
             tx: writer_tx,
             rx: reader_rx,
             read_task,
@@ -233,30 +228,3 @@ impl TryFrom<super::initiator::Initiator> for RecipientDefinition {
         Self::new(initiator_enode)
     }
 }
-
-// #[cfg(test)]
-// pub struct TestRecipient {
-//     public_key: PublicKey,
-//     id: NodeId,
-// }
-//
-// #[cfg(test)]
-// impl TestRecipient {
-//     pub fn new(definition: RecipientDefinition) -> Self {
-//         Self {
-//             public_key: definition.public_key,
-//             id: definition.id,
-//         }
-//     }
-// }
-//
-// #[cfg(test)]
-// impl Recipient for TestRecipient {
-//     fn public_key(&self) -> &PublicKey {
-//         &self.public_key
-//     }
-//
-//     fn id(&self) -> &NodeId {
-//         &self.id
-//     }
-// }

@@ -3,7 +3,7 @@ use bytes::BytesMut;
 use secp256k1::SECP256K1;
 
 use crate::{
-    ecies::parties::{initiator::Initiator, recipient::ConnectedRecipient},
+    parties::{initiator::Initiator, recipient::ConnectedRecipient},
     utils::{ecdh_x, pk2id, PROTOCOL_VERSION},
 };
 

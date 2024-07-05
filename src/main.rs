@@ -9,14 +9,14 @@ use tracing::{debug, info, trace};
 
 use crate::{
     connection::Connection,
-    ecies::parties::{initiator::Initiator, recipient::RecipientDefinition},
+    parties::{initiator::Initiator, recipient::RecipientDefinition},
 };
 
 mod connection;
-mod ecies;
 mod enode;
 mod mac;
 mod messages;
+mod parties;
 mod utils;
 
 #[derive(FromArgs, Debug)]

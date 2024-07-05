@@ -31,7 +31,6 @@ pub fn id2pk(id: NodeId) -> Result<PublicKey> {
     Ok(PublicKey::from_slice(&s)?)
 }
 
-#[allow(unused)]
 pub fn pk2id(pk: &PublicKey) -> NodeId {
     NodeId::from_slice(&pk.serialize_uncompressed()[1..])
 }

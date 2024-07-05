@@ -7,13 +7,13 @@ use crate::utils::Nonce;
 
 const NODE_KEY: &str = "eth-node-key";
 
-#[allow(dead_code)]
+// TODO: use  ephemeral_public_key: PublicKey,
+
 #[derive(Debug, Clone)]
 pub struct Initiator {
     secret_key: SecretKey,
     public_key: PublicKey,
     ephemeral_secret_key: SecretKey,
-    ephemeral_public_key: PublicKey,
     nonce: Nonce,
 }
 
@@ -33,7 +33,6 @@ impl Initiator {
             secret_key,
             public_key: PublicKey::from_secret_key(&secp, &secret_key),
             ephemeral_secret_key,
-            ephemeral_public_key: PublicKey::from_secret_key(&secp, &ephemeral_secret_key),
             nonce,
         }
     }
