@@ -12,6 +12,7 @@ use crate::{
     parties::{initiator::Initiator, recipient::RecipientDefinition},
 };
 
+// mod codec;
 mod connection;
 mod enode;
 mod mac;
@@ -53,8 +54,8 @@ async fn main() -> Result<()> {
 
     let recipient = recipient.connect().await?;
 
-    let mut connection = Connection::new(&initiator, recipient);
-    connection.send_auth_message(random_generator).await?;
+    let mut connection = Connection::new(&initiator, recipient, random_generator);
+    connection.send_auth_message().await?;
     connection.receive_auth_ack().await?;
     connection.receive().await?;
     connection.sent_hello().await?;
@@ -79,7 +80,7 @@ mod tests {
 
     use crate::{
         connection::Connection,
-        ecies::parties::{initiator::Initiator, recipient::RecipientDefinition},
+        parties::{initiator::Initiator, recipient::RecipientDefinition},
     };
 
     pub fn static_random_generator() -> impl Rng {
@@ -93,17 +94,18 @@ mod tests {
         }
         tracing_subscriber::fmt::init();
 
-        let random_generator = &mut static_random_generator();
+        let random_generator1 = &mut static_random_generator();
+        let random_generator2 = &mut static_random_generator();
 
         let file1 = "./testing_files/secret1";
-        let initiator = Initiator::test_new(random_generator, file1)
+        let initiator = Initiator::test_new(random_generator1, file1)
             .await
             .expect("Failed to create initator 1");
 
         let file2 = "./testing_files/secret2";
 
         // This is just to create a valid public key
-        let initiator2 = Initiator::test_new(random_generator, file2)
+        let initiator2 = Initiator::test_new(random_generator1, file2)
             .await
             .expect("Failed to create initator 2");
         let mut recipient: RecipientDefinition = initiator2
@@ -121,14 +123,15 @@ mod tests {
         recipient_other.port(8081);
         let connected_recipient_other = recipient_other.connect().await.expect("Failed to connect");
 
-        let mut connection = Connection::new(&initiator, connected_recipient);
+        let mut connection = Connection::new(&initiator, connected_recipient, random_generator1);
         let mut auth_message = connection
-            .generate_auth_message(random_generator)
+            .generate_auth_message()
             .expect("Failed to create auth message");
 
         println!("Encrypted messege: {:02x}", auth_message);
 
-        let mut connection_other = Connection::new(&initiator2, connected_recipient_other);
+        let mut connection_other =
+            Connection::new(&initiator2, connected_recipient_other, random_generator2);
         connection_other
             .decrypt_message_auth(&mut auth_message)
             .expect("Failed to decrypt auth");

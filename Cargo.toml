@@ -35,6 +35,7 @@ typenum = "1.17.0"
 block-padding = "0.3.3"
 byteorder = "1.5.0"
 tokio-util = { version = "0.7.11", features = ["full"] }
+tokio-stream = { version = "0.1.15", features = ["full"] }
 
 [dev-dependencies]
 rand_chacha = "0.3.1"

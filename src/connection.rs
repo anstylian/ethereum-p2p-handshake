@@ -11,20 +11,20 @@ use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use sha2::Digest;
 use tracing::{instrument, trace};
 
-use crate::mac::Mac;
-use crate::messages::auth_ack::AuthAck;
-use crate::messages::hello::{Capability, Hello};
-use crate::messages::MessageDecryptor;
-use crate::messages::{Disconnect, Ping, Pong};
-use crate::utils::{aes_encrypt, hmac_sha256, id2pk, key_material, pk2id};
 use crate::{
-    messages::auth::AuthBody,
+    mac::Mac,
+    messages::{
+        auth::AuthBody,
+        auth_ack::AuthAck,
+        hello::{Capability, Hello},
+        Disconnect, MessageDecryptor, Ping, Pong,
+    },
     parties::{initiator::Initiator, recipient::ConnectedRecipient},
-    utils::ecdh_x,
+    utils::{aes_encrypt, ecdh_x, hmac_sha256, id2pk, key_material, pk2id},
 };
 
 /// This is handling the communication between the initiator and the recipient
-pub struct Connection<'a> {
+pub struct Connection<'a, R: rand::Rng> {
     initiator: &'a Initiator,
     recipient: ConnectedRecipient,
 
@@ -38,10 +38,17 @@ pub struct Connection<'a> {
 
     ingress_mac: Option<Mac>,
     egress_mac: Option<Mac>,
+
+    random_generator: R,
+    body_size: Option<usize>,
 }
 
-impl<'a> Connection<'a> {
-    pub fn new(initiator: &'a Initiator, recipient: ConnectedRecipient) -> Self {
+impl<'a, R: Rng> Connection<'a, R> {
+    pub fn new(
+        initiator: &'a Initiator,
+        recipient: ConnectedRecipient,
+        random_generator: R,
+    ) -> Self {
         Self {
             initiator,
             recipient,
@@ -52,6 +59,8 @@ impl<'a> Connection<'a> {
             egress_aes: None,
             ingress_mac: None,
             egress_mac: None,
+            random_generator,
+            body_size: None,
         }
     }
 
@@ -61,10 +70,9 @@ impl<'a> Connection<'a> {
     /// 2. Encrypt the message
     /// 3. Send it
     #[instrument(skip_all)]
-    pub async fn send_auth_message(&mut self, random_generator: &mut impl Rng) -> Result<()> {
-        let buf = self.generate_auth_message(random_generator)?;
+    pub async fn send_auth_message(&mut self) -> Result<()> {
+        let buf = self.generate_auth_message()?;
 
-        self.outbound_message = Some(Bytes::copy_from_slice(&buf));
         self.recipient.send(buf).await?;
 
         Ok(())
@@ -78,7 +86,6 @@ impl<'a> Connection<'a> {
             .await
             .ok_or(eyre!("No message received"))?;
 
-        self.inbound_message = Some(Bytes::copy_from_slice(&msg[..]));
         trace!("received auth ack {:02x}", msg);
 
         self.read_auth_ack(&mut msg)?;
@@ -86,12 +93,47 @@ impl<'a> Connection<'a> {
         Ok(())
     }
 
+    pub async fn receive(&mut self) -> Result<()> {
+        let mut msg = self
+            .recipient
+            .recv()
+            .await
+            .ok_or(eyre!("No message received"))?;
+
+        self.inbound_message = Some(Bytes::copy_from_slice(&msg[..]));
+        trace!("received auth ack {:02x}", msg);
+
+        self.read_message(&mut msg)?;
+        Ok(())
+    }
+
+    pub async fn sent_hello(&mut self) -> Result<()> {
+        let mut hello = self.create_hello();
+        let buf = self.write_frame(hello.as_mut());
+
+        self.recipient.send(buf).await?;
+
+        Ok(())
+    }
+
+    pub async fn sent_ping(&mut self) -> Result<()> {
+        let mut ping = self.create_ping();
+        let buf = self.write_frame(ping.as_mut());
+
+        self.recipient.send(buf).await?;
+
+        Ok(())
+    }
+
     // TODO: pub here is only needed fo testing
     #[instrument(skip_all)]
-    pub fn generate_auth_message(&mut self, random_generator: &mut impl Rng) -> Result<BytesMut> {
+    pub fn generate_auth_message(&mut self) -> Result<BytesMut> {
         let mut auth_body = AuthBody::message(&self.recipient, self.initiator);
         // add pading
-        auth_body.resize(auth_body.len() + random_generator.gen_range(100..=300), 0);
+        auth_body.resize(
+            auth_body.len() + self.random_generator.gen_range(100..=300),
+            0,
+        );
 
         trace!(
             "Created auth-body unencrypted (this is RLP format): {:02x}",
@@ -101,10 +143,9 @@ impl<'a> Connection<'a> {
         let mut encrypted = BytesMut::new();
 
         // encrypt buffer
-        self.encrypt(&mut auth_body[..], random_generator, &mut encrypted)?;
-        // buf.put_slice(&len.to_be_bytes());
+        self.encrypt(&mut auth_body[..], &mut encrypted)?;
 
-        // buf.unsplit(encrypted);
+        self.outbound_message = Some(Bytes::copy_from_slice(&encrypted));
 
         Ok(encrypted)
     }
@@ -127,12 +168,7 @@ impl<'a> Connection<'a> {
     ///     c = AES(kE, iv , m)
     ///     d = MAC(sha256(kM), iv || c)
     ///     to Bob.
-    fn encrypt(
-        &self,
-        message: &mut [u8],
-        random_generator: &mut impl Rng,
-        out: &mut BytesMut,
-    ) -> Result<u16> {
+    fn encrypt(&mut self, message: &mut [u8], out: &mut BytesMut) -> Result<u16> {
         let total_size: u16 = u16::try_from(
             secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE  // Public key size
                 + 16                                            // Size of iv
@@ -141,12 +177,12 @@ impl<'a> Connection<'a> {
         )
         .unwrap();
 
-        let secret_key = SecretKey::new(random_generator);
+        let secret_key = SecretKey::new(&mut self.random_generator);
         let shared_secret = ecdh_x(self.recipient.public_key(), &secret_key);
 
         let (encryption_key, authentication_key) = key_material(shared_secret)?;
 
-        let iv: B128 = random_generator.gen::<[u8; 16]>().into();
+        let iv: B128 = self.random_generator.gen::<[u8; 16]>().into();
 
         // encrypt message
         let encrypted_message: &mut [u8] = message;
@@ -179,6 +215,8 @@ impl<'a> Connection<'a> {
 
     // auth-ack -> E(remote-pubk, remote-ephemeral-pubk || nonce || 0x0)
     pub fn read_auth_ack(&mut self, message: &mut BytesMut) -> Result<AuthAck> {
+        self.inbound_message = Some(Bytes::copy_from_slice(&message[..]));
+
         let decrypt_message = self.decrypt_message(message)?;
         trace!("decrypted AuthAck: {decrypt_message:02x?}");
 
@@ -209,23 +247,13 @@ impl<'a> Connection<'a> {
         Ok(m)
     }
 
-    pub async fn receive(&mut self) -> Result<()> {
-        let mut msg = self
-            .recipient
-            .recv()
-            .await
-            .ok_or(eyre!("No message received"))?;
-
-        self.inbound_message = Some(Bytes::copy_from_slice(&msg[..]));
-        trace!("received auth ack {:02x}", msg);
-
-        self.read_message(&mut msg)?;
-        Ok(())
-    }
-
     fn read_message(&mut self, message: &mut BytesMut) -> Result<()> {
         // read header
-        let frame = self.read_frame(message)?;
+        trace!("Message: {:02x}", message);
+        self.read_header(message)?;
+        let _header = message.split_to(32);
+        trace!("Message body: {:02x}", message);
+        let frame = self.read_body(message, self.body_size.unwrap())?;
         trace!("{:02x?}", frame);
 
         let (mut message_id, mut message) = frame.split_at(1);
@@ -258,24 +286,6 @@ impl<'a> Connection<'a> {
         }
 
         println!("remaining message: {:02x?}", message);
-
-        Ok(())
-    }
-
-    pub async fn sent_hello(&mut self) -> Result<()> {
-        let mut hello = self.create_hello();
-        let buf = self.write_frame(hello.as_mut());
-
-        self.recipient.send(buf).await?;
-
-        Ok(())
-    }
-
-    pub async fn sent_ping(&mut self) -> Result<()> {
-        let mut ping = self.create_ping();
-        let buf = self.write_frame(ping.as_mut());
-
-        self.recipient.send(buf).await?;
 
         Ok(())
     }
@@ -344,7 +354,7 @@ impl<'a> Connection<'a> {
         out
     }
 
-    fn read_frame(&mut self, buf: &mut [u8]) -> Result<Vec<u8>> {
+    fn read_header(&mut self, buf: &mut [u8]) -> Result<()> {
         if buf.len() < 32 {
             return Err(eyre::eyre!(
                 "Header is too small. Needs at lease 32 bytes for header + mac"
@@ -354,7 +364,7 @@ impl<'a> Connection<'a> {
         let (header, rest) = buf.split_at_mut(16);
         let mut header: B128 = B128::from_slice(header);
 
-        let (mac_bytes, rest) = rest.split_at_mut(16);
+        let (mac_bytes, _rest) = rest.split_at_mut(16);
         let mac = B128::from_slice(mac_bytes);
 
         self.ingress_mac.as_mut().unwrap().update_header(&header);
@@ -378,12 +388,20 @@ impl<'a> Connection<'a> {
         }
         trace!("Body size: {:?}", frame_size);
 
-        let (frame, _rest) = rest.split_at_mut(frame_size as usize);
+        self.body_size = Some(frame_size);
+
+        Ok(())
+    }
+
+    fn read_body(&mut self, buf: &mut [u8], frame_size: usize) -> Result<Vec<u8>> {
+        let (frame, _rest) = buf.split_at_mut(frame_size as usize);
 
         let (frame, frame_mac) = frame.split_at_mut(frame_size.checked_sub(16).unwrap());
         let frame_mac = B128::from_slice(frame_mac);
         self.ingress_mac.as_mut().unwrap().update_body(frame);
         let current_mac = self.ingress_mac.as_mut().unwrap().digest();
+        trace!("current_mac: {:02x}", current_mac);
+        trace!("frame_mac: {:02x}", frame_mac);
         if current_mac != frame_mac {
             return Err(eyre!("Frame MAC check failed"));
         }
