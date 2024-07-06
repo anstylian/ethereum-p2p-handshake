@@ -3,7 +3,7 @@ use bytes::BytesMut;
 use secp256k1::SECP256K1;
 
 use crate::{
-    parties::{initiator::Initiator, recipient::ConnectedRecipient},
+    parties::{initiator::Initiator, recipient::RecipientDefinition},
     utils::{ecdh_x, pk2id, PROTOCOL_VERSION},
 };
 
@@ -25,7 +25,7 @@ pub struct AuthBody<'a> {
 
 impl<'a> AuthBody<'a> {
     /// Add message to buffer
-    pub fn message(recipient: &ConnectedRecipient, initiator: &Initiator) -> BytesMut {
+    pub fn message(recipient: &RecipientDefinition, initiator: &Initiator) -> BytesMut {
         //generate signiture
         let static_shared_secret = ecdh_x(recipient.public_key(), initiator.secret_key());
         let message = static_shared_secret ^ *initiator.nonce();

@@ -4,7 +4,13 @@
 //! The implementation is following the description of [The RLPx Transport Protocol](https://github.com/ethereum/devp2p/blob/master/rlpx.md)
 
 use argh::FromArgs;
+use codec::{Message, MessageCodec};
 use eyre::Result;
+use futures::sink::SinkExt;
+use parties::recipient;
+use tokio::net::TcpStream;
+use tokio_stream::StreamExt;
+use tokio_util::codec::Framed;
 use tracing::{debug, info, trace};
 
 use crate::{
@@ -52,24 +58,58 @@ async fn main() -> Result<()> {
     let recipient = RecipientDefinition::new(enode.parse()?)?;
     trace!("Recipient: {recipient:?}");
 
-    let recipient = recipient.connect().await?;
+    // let recipient = recipient.connect().await?;
+    let stream = recipient.connect().await?;
+    let connection = Connection::new(&initiator, recipient, random_generator);
 
-    let mut connection = Connection::new(&initiator, recipient, random_generator);
-    connection.send_auth_message().await?;
-    connection.receive_auth_ack().await?;
-    connection.receive().await?;
-    connection.sent_hello().await?;
-    connection.receive().await?;
-    println!("---->send PING");
-    connection.sent_ping().await?;
-    println!("---->recv PONG");
-    connection.receive().await?;
-    println!("---->send PING");
-    connection.sent_ping().await?;
-    println!("---->recv PONG");
-    connection.receive().await?;
+    connection_handler(stream, connection).await?;
 
-    connection.abort();
+    // connection.send_auth_message().await?;
+    // connection.receive_auth_ack().await?;
+    // connection.receive().await?;
+    // connection.sent_hello().await?;
+    // connection.receive().await?;
+    // println!("---->send PING");
+    // connection.sent_ping().await?;
+    // println!("---->recv PONG");
+    // connection.receive().await?;
+    // println!("---->send PING");
+    // connection.sent_ping().await?;
+    // println!("---->recv PONG");
+    // connection.receive().await?;
+    //
+    // connection.abort();
+
+    Ok(())
+}
+
+async fn connection_handler<'a, R: rand::Rng>(
+    stream: TcpStream,
+    connection: Connection<'a, R>,
+) -> Result<()> {
+    let message_codec = MessageCodec::new(connection);
+    let mut transport = Framed::new(stream, message_codec);
+
+    transport.send(Message::Auth).await?;
+
+    while let Some(request) = transport.next().await {
+        let request = request?;
+        match request {
+            Message::Auth => {
+                todo!();
+            }
+            Message::AuthAck(auth_ack) => {
+                debug!("Received: {auth_ack:?}");
+                transport.send(Message::Hello).await?;
+            }
+            Message::Frame(_) => {
+                // todo!()
+            }
+            Message::Hello => {
+                // todo!()
+            }
+        }
+    }
 
     Ok(())
 }

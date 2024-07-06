@@ -2,7 +2,10 @@ use bytes::BytesMut;
 use tokio_util::codec::{Decoder, Encoder};
 use tracing::{instrument, trace};
 
-use crate::{connection::Connection, messages::auth_ack::AuthAck};
+use crate::{
+    connection::{self, Connection},
+    messages::auth_ack::AuthAck,
+};
 
 pub enum State {
     Auth,
@@ -14,20 +17,19 @@ pub enum State {
 pub enum Message {
     Auth,
     AuthAck(AuthAck),
+    Hello,
     Frame(BytesMut),
 }
 
 pub struct MessageCodec<'a, R: rand::Rng> {
     connection: Connection<'a, R>,
-    random_generator: R,
     state: State,
 }
 
 impl<'a, R: rand::Rng> MessageCodec<'a, R> {
-    pub fn new(connection: Connection<'a, R>, random_generator: R) -> Self {
+    pub fn new(connection: Connection<'a, R>) -> Self {
         Self {
             connection,
-            random_generator,
             state: State::Auth,
         }
     }
@@ -42,6 +44,11 @@ impl<'a, R: rand::Rng> Encoder<Message> for MessageCodec<'a, R> {
                 self.state = State::AuthAck;
                 let auth = self.connection.generate_auth_message()?;
                 dst.extend_from_slice(&auth);
+            }
+            Message::Hello => {
+                let mut hello = self.connection.create_hello();
+                let hello = self.connection.write_frame(&mut hello);
+                dst.extend_from_slice(&hello);
             }
             Message::AuthAck(_) => {
                 todo!();
@@ -119,6 +126,8 @@ impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
 
                     self.state = State::Header;
 
+                    let mut r = ret.clone();
+                    self.connection.read_message(&mut r);
                     return Ok(Some(Message::Frame(ret)));
                 }
             }

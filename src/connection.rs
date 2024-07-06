@@ -19,14 +19,14 @@ use crate::{
         hello::{Capability, Hello},
         Disconnect, MessageDecryptor, Ping, Pong,
     },
-    parties::{initiator::Initiator, recipient::ConnectedRecipient},
+    parties::{initiator::Initiator, recipient::RecipientDefinition},
     utils::{aes_encrypt, ecdh_x, hmac_sha256, id2pk, key_material, pk2id},
 };
 
 /// This is handling the communication between the initiator and the recipient
 pub struct Connection<'a, R: rand::Rng> {
     initiator: &'a Initiator,
-    recipient: ConnectedRecipient,
+    recipient: RecipientDefinition,
 
     outbound_message: Option<Bytes>,
     inbound_message: Option<Bytes>,
@@ -46,7 +46,7 @@ pub struct Connection<'a, R: rand::Rng> {
 impl<'a, R: Rng> Connection<'a, R> {
     pub fn new(
         initiator: &'a Initiator,
-        recipient: ConnectedRecipient,
+        recipient: RecipientDefinition,
         random_generator: R,
     ) -> Self {
         Self {
@@ -69,61 +69,61 @@ impl<'a, R: Rng> Connection<'a, R> {
     /// 1. Prepare the raw message
     /// 2. Encrypt the message
     /// 3. Send it
-    #[instrument(skip_all)]
-    pub async fn send_auth_message(&mut self) -> Result<()> {
-        let buf = self.generate_auth_message()?;
+    // #[instrument(skip_all)]
+    // pub async fn send_auth_message(&mut self) -> Result<()> {
+    //     let buf = self.generate_auth_message()?;
+    //
+    //     self.recipient.send(buf).await?;
+    //
+    //     Ok(())
+    // }
 
-        self.recipient.send(buf).await?;
-
-        Ok(())
-    }
-
-    #[instrument(skip_all)]
-    pub async fn receive_auth_ack(&mut self) -> Result<()> {
-        let mut msg = self
-            .recipient
-            .recv()
-            .await
-            .ok_or(eyre!("No message received"))?;
-
-        trace!("received auth ack {:02x}", msg);
-
-        self.read_auth_ack(&mut msg)?;
-
-        Ok(())
-    }
-
-    pub async fn receive(&mut self) -> Result<()> {
-        let mut msg = self
-            .recipient
-            .recv()
-            .await
-            .ok_or(eyre!("No message received"))?;
-
-        self.inbound_message = Some(Bytes::copy_from_slice(&msg[..]));
-        trace!("received auth ack {:02x}", msg);
-
-        self.read_message(&mut msg)?;
-        Ok(())
-    }
-
-    pub async fn sent_hello(&mut self) -> Result<()> {
-        let mut hello = self.create_hello();
-        let buf = self.write_frame(hello.as_mut());
-
-        self.recipient.send(buf).await?;
-
-        Ok(())
-    }
-
-    pub async fn sent_ping(&mut self) -> Result<()> {
-        let mut ping = self.create_ping();
-        let buf = self.write_frame(ping.as_mut());
-
-        self.recipient.send(buf).await?;
-
-        Ok(())
-    }
+    // #[instrument(skip_all)]
+    // pub async fn receive_auth_ack(&mut self) -> Result<()> {
+    //     let mut msg = self
+    //         .recipient
+    //         .recv()
+    //         .await
+    //         .ok_or(eyre!("No message received"))?;
+    //
+    //     trace!("received auth ack {:02x}", msg);
+    //
+    //     self.read_auth_ack(&mut msg)?;
+    //
+    //     Ok(())
+    // }
+    //
+    // pub async fn receive(&mut self) -> Result<()> {
+    //     let mut msg = self
+    //         .recipient
+    //         .recv()
+    //         .await
+    //         .ok_or(eyre!("No message received"))?;
+    //
+    //     self.inbound_message = Some(Bytes::copy_from_slice(&msg[..]));
+    //     trace!("received auth ack {:02x}", msg);
+    //
+    //     self.read_message(&mut msg)?;
+    //     Ok(())
+    // }
+    //
+    // pub async fn sent_hello(&mut self) -> Result<()> {
+    //     let mut hello = self.create_hello();
+    //     let buf = self.write_frame(hello.as_mut());
+    //
+    //     self.recipient.send(buf).await?;
+    //
+    //     Ok(())
+    // }
+    //
+    // pub async fn sent_ping(&mut self) -> Result<()> {
+    //     let mut ping = self.create_ping();
+    //     let buf = self.write_frame(ping.as_mut());
+    //
+    //     self.recipient.send(buf).await?;
+    //
+    //     Ok(())
+    // }
 
     // TODO: pub here is only needed fo testing
     #[instrument(skip_all)]
@@ -150,9 +150,9 @@ impl<'a, R: Rng> Connection<'a, R> {
         Ok(encrypted)
     }
 
-    pub fn abort(&mut self) {
-        self.recipient.abort();
-    }
+    // pub fn abort(&mut self) {
+    //     self.recipient.abort();
+    // }
 
     /// documentation fomr RLPx: https://github.com/ethereum/devp2p/blob/master/rlpx.md
     /// Alice wants to send an encrypted message that can be decrypted by Bobs static private key kB.
@@ -247,16 +247,16 @@ impl<'a, R: Rng> Connection<'a, R> {
         Ok(m)
     }
 
-    fn read_message(&mut self, message: &mut BytesMut) -> Result<()> {
+    pub fn read_message(&mut self, message: &mut BytesMut) -> Result<()> {
         // read header
         trace!("Message: {:02x}", message);
-        self.read_header(message)?;
-        let _header = message.split_to(32);
-        trace!("Message body: {:02x}", message);
-        let frame = self.read_body(message, self.body_size.unwrap())?;
-        trace!("{:02x?}", frame);
+        // self.read_header(message)?;
+        // let _header = message.split_to(32);
+        // trace!("Message body: {:02x}", message);
+        // let frame = self.read_body(message, self.body_size.unwrap())?;
+        // trace!("{:02x?}", frame);
 
-        let (mut message_id, mut message) = frame.split_at(1);
+        let (mut message_id, mut message) = message.split_at(1);
 
         let message_id: u8 = u8::decode(&mut message_id)?;
         trace!("message_id: {:?}", message_id);
@@ -290,7 +290,7 @@ impl<'a, R: Rng> Connection<'a, R> {
         Ok(())
     }
 
-    fn create_hello(&self) -> BytesMut {
+    pub fn create_hello(&self) -> BytesMut {
         let mut hello = BytesMut::new();
         let capabilities = vec![Capability::new("eth".to_string(), 68)];
         Hello::new(
@@ -311,7 +311,7 @@ impl<'a, R: Rng> Connection<'a, R> {
         ping
     }
 
-    fn write_frame(&mut self, message: &mut [u8]) -> BytesMut {
+    pub fn write_frame(&mut self, message: &mut [u8]) -> BytesMut {
         let mut out = BytesMut::new();
         let mut buf = [0u8; 8];
 

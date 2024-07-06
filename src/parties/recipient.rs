@@ -27,6 +27,8 @@ pub struct StreamMessage(BytesMut);
 pub struct RecipientDefinition {
     public_key: PublicKey,
     address: SocketAddr,
+    ephemeral_public_key: Option<PublicKey>,
+    nonce: Option<B256>,
 }
 
 impl RecipientDefinition {
@@ -34,11 +36,14 @@ impl RecipientDefinition {
         Ok(Self {
             public_key: id2pk(enode.node_id())?,
             address: enode.address(),
+            ephemeral_public_key: None,
+            nonce: None,
         })
     }
 
     #[instrument(skip_all)]
-    pub async fn connect(self) -> Result<ConnectedRecipient> {
+    pub async fn connect(&self) -> Result<TcpStream> {
+        // TODO: make this call only once
         trace!("Connecting to {}", self.address);
         let stream = timeout(
             Duration::from_secs(CONNECTION_TIMEOUT),
@@ -46,63 +51,7 @@ impl RecipientDefinition {
         )
         .await??;
 
-        Ok(ConnectedRecipient::new(self.public_key, stream))
-    }
-
-    #[cfg(test)]
-    pub fn port(&mut self, port: u16) {
-        use std::net::{IpAddr, Ipv4Addr};
-
-        self.address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-    }
-}
-
-pub struct ConnectedRecipient {
-    public_key: PublicKey,
-    tx: UnboundedSender<StreamMessage>,
-    rx: UnboundedReceiver<StreamMessage>,
-    connection_handler: tokio::task::JoinHandle<Result<()>>,
-    ephemeral_public_key: Option<PublicKey>,
-    nonce: Option<B256>,
-}
-
-impl ConnectedRecipient {
-    pub fn new(public_key: PublicKey, stream: TcpStream) -> ConnectedRecipient {
-        let (reader_tx, reader_rx) = mpsc::unbounded_channel();
-        let (writer_tx, writer_rx) = mpsc::unbounded_channel();
-
-        let mut transport = Framed::new(stream, MessageCodec);
-
-        let connection_handler =
-            tokio::task::spawn(async move { connection_handler(transport).await });
-        // let (reader, writer) = stream.into_split();
-
-        // let read_task = tokio::task::spawn(stream_reader(reader, reader_tx));
-        // let write_task = tokio::task::spawn(stream_writer(writer, writer_rx));
-
-        Self {
-            public_key,
-            tx: writer_tx,
-            rx: reader_rx,
-            connection_handler,
-            ephemeral_public_key: None,
-            nonce: None,
-        }
-    }
-
-    pub fn abort(&mut self) {
-        // self.read_task.abort();
-        // self.write_task.abort();
-    }
-
-    pub async fn send(&self, buf: BytesMut) -> Result<()> {
-        self.tx.send(StreamMessage(buf))?;
-        Ok(())
-    }
-
-    pub(crate) async fn recv(&mut self) -> Option<BytesMut> {
-        // Ok(self.rx.recv().await?.0)
-        self.rx.recv().await.map(|m| m.0)
+        Ok(stream)
     }
 
     pub fn public_key(&self) -> &PublicKey {
@@ -128,22 +77,102 @@ impl ConnectedRecipient {
     pub fn set_ephemeral_public_key(&mut self, public_key: PublicKey) {
         self.ephemeral_public_key = Some(public_key);
     }
-}
 
-async fn connection_handler(transport: Framed<TcpStream, MessageCodec>) -> Result<()> {
-    let mut transport = transport;
-    while let Some(request) = transport.next().await {
-        match request {
-            Ok(_request) => {
-                // let response = respond(request).await?;
-                // transport.send(response).await?;
-            }
-            Err(e) => return Err(e.into()),
-        }
+    #[cfg(test)]
+    pub fn port(&mut self, port: u16) {
+        use std::net::{IpAddr, Ipv4Addr};
+
+        self.address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
     }
-
-    Ok(())
 }
+
+// pub struct ConnectedRecipient {
+//     public_key: PublicKey,
+//     tx: UnboundedSender<StreamMessage>,
+//     rx: UnboundedReceiver<StreamMessage>,
+//     connection_handler: tokio::task::JoinHandle<Result<()>>,
+//     ephemeral_public_key: Option<PublicKey>,
+//     nonce: Option<B256>,
+// }
+//
+// impl ConnectedRecipient {
+//     pub fn new(public_key: PublicKey, stream: TcpStream) -> ConnectedRecipient {
+//         let (reader_tx, reader_rx) = mpsc::unbounded_channel();
+//         let (writer_tx, writer_rx) = mpsc::unbounded_channel();
+//
+//         let mut transport = Framed::new(stream, MessageCodec::new());
+//
+//         let connection_handler =
+//             tokio::task::spawn(async move { connection_handler(transport).await });
+//         // let (reader, writer) = stream.into_split();
+//
+//         // let read_task = tokio::task::spawn(stream_reader(reader, reader_tx));
+//         // let write_task = tokio::task::spawn(stream_writer(writer, writer_rx));
+//
+//         Self {
+//             public_key,
+//             tx: writer_tx,
+//             rx: reader_rx,
+//             connection_handler,
+//             ephemeral_public_key: None,
+//             nonce: None,
+//         }
+//     }
+//
+//     pub fn abort(&mut self) {
+//         // self.read_task.abort();
+//         // self.write_task.abort();
+//     }
+//
+//     pub async fn send(&self, buf: BytesMut) -> Result<()> {
+//         self.tx.send(StreamMessage(buf))?;
+//         Ok(())
+//     }
+//
+//     pub(crate) async fn recv(&mut self) -> Option<BytesMut> {
+//         // Ok(self.rx.recv().await?.0)
+//         self.rx.recv().await.map(|m| m.0)
+//     }
+//
+//     pub fn public_key(&self) -> &PublicKey {
+//         &self.public_key
+//     }
+//
+//     pub fn ephemeral_public_key(&self) -> Result<&PublicKey> {
+//         self.ephemeral_public_key
+//             .as_ref()
+//             .ok_or(eyre!("Recipient public key is not initialized"))
+//     }
+//
+//     pub fn nonce(&self) -> Result<&B256> {
+//         self.nonce
+//             .as_ref()
+//             .ok_or(eyre!("Recipient public key is not initialized"))
+//     }
+//
+//     pub fn set_nonce(&mut self, nonce: B256) {
+//         self.nonce = Some(nonce);
+//     }
+//
+//     pub fn set_ephemeral_public_key(&mut self, public_key: PublicKey) {
+//         self.ephemeral_public_key = Some(public_key);
+//     }
+// }
+//
+// async fn connection_handler(transport: Framed<TcpStream, MessageCodec>) -> Result<()> {
+//     let mut transport = transport;
+//     while let Some(request) = transport.next().await {
+//         match request {
+//             Ok(_request) => {
+//                 // let response = respond(request).await?;
+//                 // transport.send(response).await?;
+//             }
+//             Err(e) => return Err(e.into()),
+//         }
+//     }
+//
+//     Ok(())
+// }
 
 // TODO: reading packages needs refactor. There are possible errors
 // TODO: close the streams
