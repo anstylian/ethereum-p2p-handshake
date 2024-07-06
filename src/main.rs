@@ -12,7 +12,7 @@ use crate::{
     parties::{initiator::Initiator, recipient::RecipientDefinition},
 };
 
-// mod codec;
+mod codec;
 mod connection;
 mod enode;
 mod mac;

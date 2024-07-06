@@ -354,7 +354,7 @@ impl<'a, R: Rng> Connection<'a, R> {
         out
     }
 
-    fn read_header(&mut self, buf: &mut [u8]) -> Result<()> {
+    pub fn read_header(&mut self, buf: &mut [u8]) -> Result<()> {
         if buf.len() < 32 {
             return Err(eyre::eyre!(
                 "Header is too small. Needs at lease 32 bytes for header + mac"
@@ -393,7 +393,7 @@ impl<'a, R: Rng> Connection<'a, R> {
         Ok(())
     }
 
-    fn read_body(&mut self, buf: &mut [u8], frame_size: usize) -> Result<Vec<u8>> {
+    pub fn read_body(&mut self, buf: &mut [u8], frame_size: usize) -> Result<Vec<u8>> {
         let (frame, _rest) = buf.split_at_mut(frame_size as usize);
 
         let (frame, frame_mac) = frame.split_at_mut(frame_size.checked_sub(16).unwrap());
@@ -409,6 +409,10 @@ impl<'a, R: Rng> Connection<'a, R> {
         self.ingress_aes.as_mut().unwrap().apply_keystream(frame);
 
         Ok(frame.to_vec())
+    }
+
+    pub fn body_size(&self) -> usize {
+        self.body_size.unwrap()
     }
 
     #[cfg(test)]
