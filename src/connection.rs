@@ -61,7 +61,6 @@ impl<'a, R: Rng> Connection<'a, R> {
         }
     }
 
-    // TODO: pub here is only needed fo testing
     #[instrument(skip_all)]
     pub fn generate_auth_message(&mut self) -> Result<BytesMut> {
         let mut auth_body = AuthBody::message(&self.recipient, self.initiator);
@@ -121,8 +120,6 @@ impl<'a, R: Rng> Connection<'a, R> {
         aes_encrypt(encryption_key, &mut encrypted_message[..], iv);
         // from here and on message is encrypted
 
-        // TODO: add pading
-
         let d = hmac_sha256(
             &authentication_key.0,
             &[&iv.0, encrypted_message],
@@ -146,13 +143,44 @@ impl<'a, R: Rng> Connection<'a, R> {
     }
 
     // auth-ack -> E(remote-pubk, remote-ephemeral-pubk || nonce || 0x0)
-    pub fn read_auth_ack(&mut self, message: &mut BytesMut) -> Result<AuthAck> {
-        self.inbound_message = Some(Bytes::copy_from_slice(&message[..]));
+    pub fn read_auth_ack(&mut self, message: &mut [u8]) -> Result<AuthAck> {
+        self.inbound_message = Some(Bytes::copy_from_slice(message));
 
         let decrypt_message = self.decrypt_message(message)?;
         trace!("decrypted AuthAck: {decrypt_message:02x?}");
 
-        let auth_ack = AuthAck::decode(&mut decrypt_message.as_ref())?;
+        // Clippy does not accept this:
+        // let auth_ack = AuthAck::decode(&mut decrypt_message.as_ref())?;
+        // Gives this:
+        //
+        // warning: this call to `as_ref` does nothing
+        // --> src/connection.rs:156:45
+        //    |
+        //156 |         let auth_ack = AuthAck::decode(&mut decrypt_message.as_ref())?;
+        //    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^ help: try: `decrypt_message`
+        //    |
+        //    = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#useless_asref
+        //    = note: `#[warn(clippy::useless_asref)]` on by default
+        //
+        //    After following clippy is not compiling
+        //
+        // error[E0308]: mismatched types
+        //   --> src/connection.rs:168:40
+        //    |
+        //168 |         let auth_ack = AuthAck::decode(decrypt_message)?;
+        //    |                        --------------- ^^^^^^^^^^^^^^^ expected `&mut &[u8]`, found `&mut [u8]`
+        //    |                        |
+        //    |                        arguments to this function are incorrect
+        //    |
+        //    = note: expected mutable reference `&mut &_`
+        //               found mutable reference `&mut _`
+        //note: associated function defined here
+        //   --> /home/angelos/.cargo/registry/src/index.crates.io-6f17d22bba15001f/alloy-rlp-0.3.7/src/decode.rs:9:8
+        //    |
+        //9   |     fn decode(buf: &mut &[u8]) -> Result<Self>;
+        //    |        ^^^^^^
+
+        let auth_ack = AuthAck::decode(&mut &*decrypt_message)?;
         trace!("received auth ack {:02x?}", auth_ack);
 
         self.recipient.set_nonce(auth_ack.nonce().into());

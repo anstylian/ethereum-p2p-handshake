@@ -25,8 +25,6 @@ mod messages;
 mod parties;
 mod utils;
 
-// TODO: close the streams
-
 #[derive(FromArgs, Debug)]
 /// Implementatation of the Ethereum P2P handshake
 struct EthereumHandshake {
@@ -87,7 +85,7 @@ async fn connection_handler<R: rand::Rng>(
     loop {
         match transport.next().await {
             Some(request) => match request {
-                Ok(MessageRet::Auth) => todo!(),
+                Ok(MessageRet::Auth) => unreachable!(),
                 Ok(MessageRet::AuthAck(auth_ack)) => {
                     info!(?auth_ack, "AuthAck message received");
                     transport.send(Message::Hello).await?;
