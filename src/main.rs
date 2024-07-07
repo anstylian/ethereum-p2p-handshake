@@ -39,8 +39,6 @@ struct EthereumHandshake {
     enodes: String,
 }
 
-use tracing_subscriber::prelude::*;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
@@ -76,22 +74,6 @@ async fn main() -> Result<()> {
 
     connection_handler(stream, connection).await?;
 
-    // connection.send_auth_message().await?;
-    // connection.receive_auth_ack().await?;
-    // connection.receive().await?;
-    // connection.sent_hello().await?;
-    // connection.receie().await?;
-    // println!("---->send PING");
-    // connection.sent_ping().await?;
-    // println!("---->recv PONG");
-    // connection.receive().await?;
-    // println!("---->send PING");
-    // connection.sent_ping().await?;
-    // println!("---->recv PONG");
-    // connection.receive().await?;
-    //
-    // connection.abort();
-
     Ok(())
 }
 
@@ -104,165 +86,54 @@ async fn connection_handler<R: rand::Rng>(
 
     transport.send(Message::Auth).await?;
 
-    let recv = transport.next().await.unwrap()?;
-    let MessageRet::AuthAck(auth_ack) = recv else {
-        panic!("failed to get auth-ack");
-    };
-    trace!("Received auth-ack: {:?}", auth_ack);
+    let mut start_ping = false;
+    let mut ping_countdown = 1000;
 
-    let recv = transport.next().await.unwrap()?;
-    let MessageRet::Hello(hello) = recv else {
-        panic!("failed to get auth-ack");
-    };
-    trace!("Received hello: {:?}", hello);
+    while let Some(request) = transport.next().await {
+        match request {
+            Ok(MessageRet::Auth) => todo!(),
+            Ok(MessageRet::AuthAck(auth_ack)) => {
+                info!("AuthAck message received: {auth_ack:?}");
+                transport.send(Message::Hello).await?;
+            }
+            Ok(MessageRet::Hello(hello)) => {
+                info!("Hello message received: {hello:?}");
+                transport.send(Message::Disconnect).await?;
+                break;
 
-    transport.send(Message::Hello).await?;
-    println!();
-    println!();
-    println!();
-    println!();
-
-    transport.send(Message::Ping).await?;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    let recv = transport.next().await.unwrap()?;
-    println!("Received: {recv:?}");
-
-    println!("SENDING PING");
-    transport.send(Message::Ping).await?;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    let recv = transport.next().await;
-    if let Some(Ok(m)) = &recv {
-        if let MessageRet::Ping(p) = m {
-            println!("---> ping recv");
-        }
-    } else {
-        let recv = transport.next().await;
-        if let Some(Ok(m)) = recv {
-            if let MessageRet::Ping(p) = m {
-                println!("---> ping recv");
+                // ping_countdown -= 1;
+            }
+            Ok(MessageRet::Disconnect(disconnect)) => {
+                info!("Disconnect recevived: {disconnect:?}");
+                break;
+            }
+            Ok(MessageRet::Ping(_)) => {
+                info!("Ping recevived");
+            }
+            Ok(MessageRet::Ignore) => {
+                info!("Ignore unsupported message");
+            }
+            Err(e) => {
+                error!("Error: {e:?}");
+                break;
             }
         }
-    }
-    println!("Received: {recv:?}");
 
-    println!("SENDING PING");
-    transport.send(Message::Ping).await?;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    let recv = transport.next().await;
-    if let Some(Ok(m)) = &recv {
-        if let MessageRet::Ping(p) = m {
-            println!("---> ping recv");
+        if ping_countdown == 0 {
+            info!("Disconnect send");
+            transport.send(Message::Disconnect).await?;
+            break;
         }
-    } else {
-        let recv = transport.next().await;
-        if let Some(Ok(m)) = recv {
-            if let MessageRet::Ping(p) = m {
-                println!("---> ping recv");
-            }
+
+        if start_ping {
+            info!("Sending ping: {:?}", ping_countdown);
+            transport.send(Message::Ping).await?;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            ping_countdown -= 1;
         }
     }
-    println!("Received: {recv:?}");
 
-    println!("SENDING PING");
-    transport.send(Message::Ping).await?;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    let recv = transport.next().await;
-    if let Some(Ok(m)) = &recv {
-        if let MessageRet::Ping(p) = m {
-            println!("---> ping recv");
-        }
-    } else {
-        let recv = transport.next().await;
-        if let Some(Ok(m)) = recv {
-            if let MessageRet::Ping(p) = m {
-                println!("---> ping recv");
-            }
-        }
-    }
-    println!("Received: {recv:?}");
-
-    transport.send(Message::Disconnect).await?;
-
-    std::process::exit(-1);
-
-    // let mut auth_ack_recv = false;
-    // let mut hello_recv = false;
-    // let mut ping_counter = 0;
-    //
-    // while let Some(request) = transport.next().await {
-    //     // loop {
-    //     // let request = transport.next().await;
-    //     // let request = match request {
-    //     //     Some(req) => {
-    //     //         debug!("Receive: {req:?}");
-    //     //         req
-    //     //     }
-    //     //     None => {
-    //     //         debug!("Got None");
-    //     //         continue;
-    //     //     }
-    //     // };
-    //     let request = request?;
-    //     match request {
-    //         MessageRet::Auth => {
-    //             todo!();
-    //         }
-    //         MessageRet::AuthAck(auth_ack) => {
-    //             debug!("Received: {auth_ack:?}");
-    //             transport.send(Message::Hello).await?;
-    //             auth_ack_recv = true;
-    //
-    //             if auth_ack_recv && hello_recv == true {
-    //                 transport.send(Message::Ping).await?;
-    //                 // tokio::time::sleep(Duration::from_millis(100)).await;
-    //                 // transport.send(Message::Disconnect).await?;
-    //                 // break;
-    //             }
-    //         }
-    //         MessageRet::Hello(hello) => {
-    //             if hello.port() == 0 {
-    //                 error!("Client is not listening");
-    //                 transport.send(Message::Disconnect).await?;
-    //                 break;
-    //             }
-    //             debug!("Hello message received: {hello:?}");
-    //             hello_recv = true;
-    //
-    //             if auth_ack_recv && hello_recv == true {
-    //                 // transport.send(Message::Disconnect).await?;
-    //                 // break;
-    //
-    //                 transport.send(Message::Ping).await?;
-    //                 // tokio::time::sleep(Duration::from_millis(100)).await;
-    //             }
-    //         }
-    //         MessageRet::Ping(_) => {
-    //             // tokio::time::sleep(Duration::from_millis(100)).await;
-    //             debug!("Ping message received");
-    //             transport.send(Message::Pong).await?;
-    //         }
-    //         MessageRet::Pong(_) => {
-    //             // tokio::time::sleep(Duration::from_millis(100)).await;
-    //             debug!("Pong message received");
-    //             transport.send(Message::Ping).await?;
-    //             ping_counter += 1;
-    //         }
-    //         MessageRet::Disconnect(disconnect) => {
-    //             debug!("Disconnect message received: {disconnect}");
-    //             break;
-    //         }
-    //         MessageRet::Ignore => {
-    //             println!("Ignore!!!");
-    //         }
-    //     }
-    //
-    //     if ping_counter == 3 {
-    //         transport.send(Message::Disconnect).await?;
-    //         break;
-    //     }
-    // }
-    //
-    // transport.close().await?;
+    transport.close().await?;
 
     Ok(())
 }

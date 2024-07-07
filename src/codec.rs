@@ -4,7 +4,7 @@ use tracing::{instrument, trace};
 
 use crate::{
     connection::Connection,
-    messages::{auth_ack::AuthAck, hello::Hello, Disconnect, FrameMessage, Ping, Pong},
+    messages::{auth_ack::AuthAck, hello::Hello, Disconnect, Ping},
 };
 
 pub enum State {
@@ -17,13 +17,9 @@ pub enum State {
 #[derive(Debug)]
 pub enum Message {
     Auth,
-    AuthAck(AuthAck),
     Hello,
     Disconnect,
     Ping,
-    Pong,
-    // Frame(BytesMut),
-    // Framed(FrameMessage),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -64,12 +60,8 @@ impl<'a, R: rand::Rng> Encoder<Message> for MessageCodec<'a, R> {
                 let auth = self.connection.generate_auth_message()?;
                 dst.extend_from_slice(&auth);
             }
-            Message::AuthAck(_) => {
-                todo!();
-            }
             Message::Hello => {
                 let mut hello = self.connection.create_hello();
-                println!("Send hello: {hello:02x}");
                 let hello = self.connection.write_frame(&mut hello);
                 dst.extend_from_slice(&hello);
             }
@@ -82,12 +74,11 @@ impl<'a, R: rand::Rng> Encoder<Message> for MessageCodec<'a, R> {
                 let mut ping = self.connection.create_ping();
                 let ping = self.connection.write_frame(&mut ping);
                 dst.extend_from_slice(&ping);
-            }
-            Message::Pong => {
-                let mut pong = self.connection.create_pong();
-                let pong = self.connection.write_frame(&mut pong);
-                dst.extend_from_slice(&pong);
-            }
+            } // Message::Pong => {
+              //     let mut pong = self.connection.create_pong();
+              //     let pong = self.connection.write_frame(&mut pong);
+              //     dst.extend_from_slice(&pong);
+              // }
         }
         Ok(())
     }
@@ -130,6 +121,8 @@ impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
                     return Ok(Some(MessageRet::AuthAck(auth_ack)));
                 }
                 State::Header => {
+                    trace!("Reading header");
+                    println!("Remaining buffer: {buf:02x}");
                     if buf.len() < 32 {
                         trace!("Buffer can not hold the header: buf len: {}", buf.len());
                         trace!("Buffer: {:02x?}", buf);
@@ -141,13 +134,13 @@ impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
                     self.state = State::Body(len);
                 }
                 State::Body(len) => {
+                    trace!("Reading body");
                     if buf.len() < len {
                         trace!("Expected {} body, but only have {}", len, buf.len());
                         return Ok(None);
                     }
 
                     let mut data = buf.split_to(len);
-                    println!("Remaining buffer: {buf:02x?}");
                     let mut ret = BytesMut::new();
                     ret.extend_from_slice(&self.connection.read_body(&mut data, len)?);
 
@@ -155,6 +148,7 @@ impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
 
                     let mut r = ret.clone();
                     let message = self.connection.read_message(&mut r)?;
+                    trace!("Received message: {:?}", message);
                     return Ok(Some(message));
                 }
             }

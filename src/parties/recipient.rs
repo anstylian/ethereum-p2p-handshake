@@ -7,7 +7,6 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tracing::{debug, instrument};
 
-// use crate::codec::MessageCodec;
 use crate::enode::Enode;
 use crate::utils::id2pk;
 
@@ -68,12 +67,12 @@ impl Recipient {
         self.ephemeral_public_key = Some(public_key);
     }
 
-    #[cfg(test)]
-    pub fn port(&mut self, port: u16) {
-        use std::net::{IpAddr, Ipv4Addr};
-
-        self.address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-    }
+    // #[cfg(test)]
+    // pub fn port(&mut self, port: u16) {
+    //     use std::net::{IpAddr, Ipv4Addr};
+    //
+    //     self.address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
+    // }
 }
 
 #[cfg(test)]

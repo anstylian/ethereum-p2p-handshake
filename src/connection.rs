@@ -12,13 +12,13 @@ use sha2::Digest;
 use tracing::{instrument, trace};
 
 use crate::{
-    codec::{Message, MessageRet},
+    codec::MessageRet,
     mac::Mac,
     messages::{
         auth::AuthBody,
         auth_ack::AuthAck,
         hello::{Capability, Hello},
-        Disconnect, MessageDecryptor, Ping, Pong,
+        Disconnect, MessageDecryptor, Ping,
     },
     parties::{initiator::Initiator, recipient::Recipient},
     utils::{aes_encrypt, ecdh_x, hmac_sha256, id2pk, key_material, pk2id},
@@ -178,41 +178,52 @@ impl<'a, R: Rng> Connection<'a, R> {
     }
 
     pub fn read_message(&mut self, message: &mut BytesMut) -> Result<MessageRet> {
-        // read header
-        trace!("Message: {:02x}", message);
+        trace!("Message bytes: {:02x}", message);
 
         let (mut message_id, mut message) = message.split_at(1);
-
         let message_id: u8 = u8::decode(&mut message_id)?;
         trace!("message_id: {:?}", message_id);
 
         match message_id {
             0x0u8 => {
-                trace!("Hello: {message:02x?}");
+                trace!("Hello bytes: {message:02x?}");
                 let hello: Hello = Hello::decode(&mut message)?;
                 trace!("Hello message from target node: {:?}", hello);
                 return Ok(MessageRet::Hello(hello));
             }
             0x1u8 => {
-                trace!("Disconnect: {message:02x?}");
+                trace!("Disconnect bytes: {message:02x?}");
                 let disconnect = Disconnect::decode(&mut message)?;
                 trace!("Disconnect: {:?}", disconnect);
                 return Ok(MessageRet::Disconnect(disconnect));
             }
             0x2u8 => {
-                trace!("Ping: {message:02x?}");
-                let ping = Ping::decode(&mut message)?;
-                trace!("Ping: {:?}", ping);
-                return Ok(MessageRet::Ping(ping));
+                trace!("Ping bytes: {message:02x?}");
+                if message.starts_with(&[0x1, 0x0, 0xc0]) {
+                    return Ok(MessageRet::Ping(Ping {}));
+                } else {
+                    return Err(eyre!("This is not a ping message: {message:02x?}"));
+                }
+                // let message = self.decode_ping(&mut message)?;
+                // let ping = Ping::decode(&mut message)?;
+                // trace!("Ping bytes: {:?}", ping);
             }
             0x3u8 => {
-                trace!("Pong: {message:02x?}");
-                let pong = Ping::decode(&mut message)?;
-                trace!("Pong: {:?}", pong);
-                return Ok(MessageRet::Ping(pong));
+                trace!("Pong bytes: {message:02x?}");
+                if message.starts_with(&[0x1, 0x0, 0xc0]) {
+                    return Ok(MessageRet::Ping(Ping {}));
+                } else {
+                    return Err(eyre!("This is not a ping message: {message:02x?}"));
+                }
+                // self.decode_ping(&mut message)?;
+                // let pong = Ping::decode(&mut message)?;
+                // trace!("Pong bytes: {:?}", pong);
+                // return Ok(MessageRet::Ping(Ping {}));
             }
             id => {
                 println!("unknown id: {id:?}");
+                trace!("unknown bytes: {message:02x?}");
+
                 return Ok(MessageRet::Ignore);
             }
         }
@@ -243,20 +254,29 @@ impl<'a, R: Rng> Connection<'a, R> {
         ping
     }
 
-    pub fn create_pong(&self) -> BytesMut {
-        let mut pong = BytesMut::new();
-        0x3u8.encode(&mut pong);
-        pong.put_u8(0x01);
-        pong.put_u8(0x00);
-        pong.put_u8(0xC0);
+    // fn decode_ping(&self, buf: &mut &'a [u8]) -> Result<&mut &'a [u8]> {
+    //     if buf.starts_with(&[0x1, 0x0, 0xc0]) {
+    //         let (_, res) = buf.split_at_mut(3);
+    //         Ok(res)
+    //     } else {
+    //         Err(eyre!("This is not a ping message: {buf:02x?}"))
+    //     }
+    // }
 
-        pong
-    }
+    // pub fn create_pong(&self) -> BytesMut {
+    //     let mut pong = BytesMut::new();
+    //     0x3u8.encode(&mut pong);
+    //     pong.put_u8(0x01);
+    //     pong.put_u8(0x00);
+    //     pong.put_u8(0xC0);
+    //
+    //     pong
+    // }
 
     pub fn create_disconnect(&self) -> BytesMut {
         let mut disconnect = BytesMut::new();
         0x1u8.encode(&mut disconnect);
-        Disconnect { reason: 0x3 }.encode(&mut disconnect);
+        Disconnect { reason: 0x8 }.encode(&mut disconnect);
 
         disconnect
     }

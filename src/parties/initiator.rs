@@ -37,22 +37,6 @@ impl Initiator {
         }
     }
 
-    #[cfg(test)]
-    pub async fn test_new<R: Rng, P: AsRef<std::path::Path>>(
-        random_generator: &mut R,
-        secret_backup: P,
-    ) -> Result<Self> {
-        let secret_key = generate_restorable_secret(random_generator, secret_backup).await?;
-        Ok(Self::new_inner(secret_key, random_generator))
-    }
-
-    #[cfg(test)]
-    pub fn enode(&self) -> Result<crate::enode::Enode> {
-        let id = pk2id(&self.public_key);
-
-        format!("enode://{}@127.0.0.1:40404", id).as_str().parse()
-    }
-
     pub fn node_id(&self) -> NodeId {
         pk2id(&self.public_key)
     }
@@ -71,5 +55,21 @@ impl Initiator {
 
     pub fn public_key(&self) -> &PublicKey {
         &self.public_key
+    }
+
+    // #[cfg(test)]
+    // pub async fn test_new<R: Rng, P: AsRef<std::path::Path>>(
+    //     random_generator: &mut R,
+    //     secret_backup: P,
+    // ) -> Result<Self> {
+    //     let secret_key = generate_restorable_secret(random_generator, secret_backup).await?;
+    //     Ok(Self::new_inner(secret_key, random_generator))
+    // }
+
+    #[cfg(test)]
+    pub fn enode(&self) -> Result<crate::enode::Enode> {
+        let id = pk2id(&self.public_key);
+
+        format!("enode://{}@127.0.0.1:40404", id).as_str().parse()
     }
 }

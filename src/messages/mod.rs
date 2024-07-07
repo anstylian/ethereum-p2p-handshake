@@ -10,6 +10,7 @@ use self::hello::Hello;
 pub mod auth;
 pub mod auth_ack;
 pub mod hello;
+// pub mod status;
 
 #[derive(Debug)]
 pub enum FrameMessage {
