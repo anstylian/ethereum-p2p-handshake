@@ -26,14 +26,13 @@ pub enum Message {
     // Framed(FrameMessage),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum MessageRet {
     Auth,
     AuthAck(AuthAck),
     Hello(Hello),
     Disconnect(Disconnect),
     Ping(Ping),
-    Pong(Pong),
     Ignore,
     // Frame(BytesMut),
     // Framed(FrameMessage),
@@ -148,6 +147,7 @@ impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
                     }
 
                     let mut data = buf.split_to(len);
+                    println!("Remaining buffer: {buf:02x?}");
                     let mut ret = BytesMut::new();
                     ret.extend_from_slice(&self.connection.read_body(&mut data, len)?);
 

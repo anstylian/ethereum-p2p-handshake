@@ -1,7 +1,7 @@
 use crate::utils::PROTOCOL_VERSION;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 
-#[derive(Debug, RlpEncodable, RlpDecodable)]
+#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct Hello {
     protocol_version: u8,
     client_version: String,
@@ -10,7 +10,7 @@ pub struct Hello {
     id: [u8; 64],
 }
 
-#[derive(Debug, RlpEncodable, RlpDecodable)]
+#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct Capability {
     pub name: String,
     pub version: usize,

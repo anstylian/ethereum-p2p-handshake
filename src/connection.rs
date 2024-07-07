@@ -207,9 +207,9 @@ impl<'a, R: Rng> Connection<'a, R> {
             }
             0x3u8 => {
                 trace!("Pong: {message:02x?}");
-                let pong = Pong::decode(&mut message)?;
+                let pong = Ping::decode(&mut message)?;
                 trace!("Pong: {:?}", pong);
-                return Ok(MessageRet::Pong(pong));
+                return Ok(MessageRet::Ping(pong));
             }
             id => {
                 println!("unknown id: {id:?}");

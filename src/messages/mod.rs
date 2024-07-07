@@ -19,7 +19,7 @@ pub enum FrameMessage {
     Pong(Pong),
 }
 
-#[derive(Debug, RlpEncodable, RlpDecodable)]
+#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct Disconnect {
     pub reason: usize,
 }
@@ -47,10 +47,10 @@ impl std::fmt::Display for Disconnect {
     }
 }
 
-#[derive(Debug, RlpEncodable, RlpDecodable)]
+#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct Ping {}
 
-#[derive(Debug, RlpEncodable, RlpDecodable)]
+#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct Pong {}
 
 pub struct MessageDecryptor<'a> {
