@@ -2,7 +2,7 @@ use aes::Aes256;
 use alloy_primitives::{B128, B256};
 use alloy_rlp::{Decodable, Encodable};
 use byteorder::{BigEndian, ByteOrder};
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use cipher::{KeyIvInit, StreamCipher};
 use ctr::Ctr64BE;
 use eyre::{eyre, Result};
@@ -12,6 +12,7 @@ use sha2::Digest;
 use tracing::{instrument, trace};
 
 use crate::{
+    codec::{Message, MessageRet},
     mac::Mac,
     messages::{
         auth::AuthBody,
@@ -19,14 +20,14 @@ use crate::{
         hello::{Capability, Hello},
         Disconnect, MessageDecryptor, Ping, Pong,
     },
-    parties::{initiator::Initiator, recipient::RecipientDefinition},
+    parties::{initiator::Initiator, recipient::Recipient},
     utils::{aes_encrypt, ecdh_x, hmac_sha256, id2pk, key_material, pk2id},
 };
 
 /// This is handling the communication between the initiator and the recipient
 pub struct Connection<'a, R: rand::Rng> {
     initiator: &'a Initiator,
-    recipient: RecipientDefinition,
+    recipient: Recipient,
 
     outbound_message: Option<Bytes>,
     inbound_message: Option<Bytes>,
@@ -40,15 +41,10 @@ pub struct Connection<'a, R: rand::Rng> {
     egress_mac: Option<Mac>,
 
     random_generator: R,
-    body_size: Option<usize>,
 }
 
 impl<'a, R: Rng> Connection<'a, R> {
-    pub fn new(
-        initiator: &'a Initiator,
-        recipient: RecipientDefinition,
-        random_generator: R,
-    ) -> Self {
+    pub fn new(initiator: &'a Initiator, recipient: Recipient, random_generator: R) -> Self {
         Self {
             initiator,
             recipient,
@@ -60,70 +56,8 @@ impl<'a, R: Rng> Connection<'a, R> {
             ingress_mac: None,
             egress_mac: None,
             random_generator,
-            body_size: None,
         }
     }
-
-    /// send the auth message
-    /// Steps:
-    /// 1. Prepare the raw message
-    /// 2. Encrypt the message
-    /// 3. Send it
-    // #[instrument(skip_all)]
-    // pub async fn send_auth_message(&mut self) -> Result<()> {
-    //     let buf = self.generate_auth_message()?;
-    //
-    //     self.recipient.send(buf).await?;
-    //
-    //     Ok(())
-    // }
-
-    // #[instrument(skip_all)]
-    // pub async fn receive_auth_ack(&mut self) -> Result<()> {
-    //     let mut msg = self
-    //         .recipient
-    //         .recv()
-    //         .await
-    //         .ok_or(eyre!("No message received"))?;
-    //
-    //     trace!("received auth ack {:02x}", msg);
-    //
-    //     self.read_auth_ack(&mut msg)?;
-    //
-    //     Ok(())
-    // }
-    //
-    // pub async fn receive(&mut self) -> Result<()> {
-    //     let mut msg = self
-    //         .recipient
-    //         .recv()
-    //         .await
-    //         .ok_or(eyre!("No message received"))?;
-    //
-    //     self.inbound_message = Some(Bytes::copy_from_slice(&msg[..]));
-    //     trace!("received auth ack {:02x}", msg);
-    //
-    //     self.read_message(&mut msg)?;
-    //     Ok(())
-    // }
-    //
-    // pub async fn sent_hello(&mut self) -> Result<()> {
-    //     let mut hello = self.create_hello();
-    //     let buf = self.write_frame(hello.as_mut());
-    //
-    //     self.recipient.send(buf).await?;
-    //
-    //     Ok(())
-    // }
-    //
-    // pub async fn sent_ping(&mut self) -> Result<()> {
-    //     let mut ping = self.create_ping();
-    //     let buf = self.write_frame(ping.as_mut());
-    //
-    //     self.recipient.send(buf).await?;
-    //
-    //     Ok(())
-    // }
 
     // TODO: pub here is only needed fo testing
     #[instrument(skip_all)]
@@ -136,7 +70,7 @@ impl<'a, R: Rng> Connection<'a, R> {
         );
 
         trace!(
-            "Created auth-body unencrypted (this is RLP format): {:02x}",
+            "Created auth-body unencrypted (this is RLP format with padding): {:02x}",
             auth_body
         );
 
@@ -149,10 +83,6 @@ impl<'a, R: Rng> Connection<'a, R> {
 
         Ok(encrypted)
     }
-
-    // pub fn abort(&mut self) {
-    //     self.recipient.abort();
-    // }
 
     /// documentation fomr RLPx: https://github.com/ethereum/devp2p/blob/master/rlpx.md
     /// Alice wants to send an encrypted message that can be decrypted by Bobs static private key kB.
@@ -247,14 +177,9 @@ impl<'a, R: Rng> Connection<'a, R> {
         Ok(m)
     }
 
-    pub fn read_message(&mut self, message: &mut BytesMut) -> Result<()> {
+    pub fn read_message(&mut self, message: &mut BytesMut) -> Result<MessageRet> {
         // read header
         trace!("Message: {:02x}", message);
-        // self.read_header(message)?;
-        // let _header = message.split_to(32);
-        // trace!("Message body: {:02x}", message);
-        // let frame = self.read_body(message, self.body_size.unwrap())?;
-        // trace!("{:02x?}", frame);
 
         let (mut message_id, mut message) = message.split_at(1);
 
@@ -262,36 +187,40 @@ impl<'a, R: Rng> Connection<'a, R> {
         trace!("message_id: {:?}", message_id);
 
         match message_id {
-            0 => {
+            0x0u8 => {
                 trace!("Hello: {message:02x?}");
                 let hello: Hello = Hello::decode(&mut message)?;
                 trace!("Hello message from target node: {:?}", hello);
+                return Ok(MessageRet::Hello(hello));
             }
-            1 => {
+            0x1u8 => {
                 trace!("Disconnect: {message:02x?}");
                 let disconnect = Disconnect::decode(&mut message)?;
                 trace!("Disconnect: {:?}", disconnect);
+                return Ok(MessageRet::Disconnect(disconnect));
             }
-            2 => {
+            0x2u8 => {
                 trace!("Ping: {message:02x?}");
                 let ping = Ping::decode(&mut message)?;
                 trace!("Ping: {:?}", ping);
+                return Ok(MessageRet::Ping(ping));
             }
-            3 => {
+            0x3u8 => {
                 trace!("Pong: {message:02x?}");
                 let pong = Pong::decode(&mut message)?;
                 trace!("Pong: {:?}", pong);
+                return Ok(MessageRet::Pong(pong));
             }
-            _ => todo!(),
+            id => {
+                println!("unknown id: {id:?}");
+                return Ok(MessageRet::Ignore);
+            }
         }
-
-        println!("remaining message: {:02x?}", message);
-
-        Ok(())
     }
 
     pub fn create_hello(&self) -> BytesMut {
         let mut hello = BytesMut::new();
+        0x0u8.encode(&mut hello);
         let capabilities = vec![Capability::new("eth".to_string(), 68)];
         Hello::new(
             "test-client".to_string(),
@@ -304,11 +233,32 @@ impl<'a, R: Rng> Connection<'a, R> {
         hello
     }
 
-    fn create_ping(&self) -> BytesMut {
+    pub fn create_ping(&self) -> BytesMut {
         let mut ping = BytesMut::new();
-        Ping {}.encode(&mut ping);
+        0x2u8.encode(&mut ping);
+        ping.put_u8(0x01);
+        ping.put_u8(0x00);
+        ping.put_u8(0xC0);
 
         ping
+    }
+
+    pub fn create_pong(&self) -> BytesMut {
+        let mut pong = BytesMut::new();
+        0x3u8.encode(&mut pong);
+        pong.put_u8(0x01);
+        pong.put_u8(0x00);
+        pong.put_u8(0xC0);
+
+        pong
+    }
+
+    pub fn create_disconnect(&self) -> BytesMut {
+        let mut disconnect = BytesMut::new();
+        0x1u8.encode(&mut disconnect);
+        Disconnect { reason: 0x3 }.encode(&mut disconnect);
+
+        disconnect
     }
 
     pub fn write_frame(&mut self, message: &mut [u8]) -> BytesMut {
@@ -354,7 +304,7 @@ impl<'a, R: Rng> Connection<'a, R> {
         out
     }
 
-    pub fn read_header(&mut self, buf: &mut [u8]) -> Result<()> {
+    pub fn read_header(&mut self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 32 {
             return Err(eyre::eyre!(
                 "Header is too small. Needs at lease 32 bytes for header + mac"
@@ -388,13 +338,11 @@ impl<'a, R: Rng> Connection<'a, R> {
         }
         trace!("Body size: {:?}", frame_size);
 
-        self.body_size = Some(frame_size);
-
-        Ok(())
+        Ok(frame_size)
     }
 
     pub fn read_body(&mut self, buf: &mut [u8], frame_size: usize) -> Result<Vec<u8>> {
-        let (frame, _rest) = buf.split_at_mut(frame_size as usize);
+        let (frame, _rest) = buf.split_at_mut(frame_size);
 
         let (frame, frame_mac) = frame.split_at_mut(frame_size.checked_sub(16).unwrap());
         let frame_mac = B128::from_slice(frame_mac);
@@ -409,10 +357,6 @@ impl<'a, R: Rng> Connection<'a, R> {
         self.ingress_aes.as_mut().unwrap().apply_keystream(frame);
 
         Ok(frame.to_vec())
-    }
-
-    pub fn body_size(&self) -> usize {
-        self.body_size.unwrap()
     }
 
     #[cfg(test)]

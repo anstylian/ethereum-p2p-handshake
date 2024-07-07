@@ -3,22 +3,40 @@ use tokio_util::codec::{Decoder, Encoder};
 use tracing::{instrument, trace};
 
 use crate::{
-    connection::{self, Connection},
-    messages::auth_ack::AuthAck,
+    connection::Connection,
+    messages::{auth_ack::AuthAck, hello::Hello, Disconnect, FrameMessage, Ping, Pong},
 };
 
 pub enum State {
     Auth,
     AuthAck,
     Header,
-    Body,
+    Body(usize),
 }
 
+#[derive(Debug)]
 pub enum Message {
     Auth,
     AuthAck(AuthAck),
     Hello,
-    Frame(BytesMut),
+    Disconnect,
+    Ping,
+    Pong,
+    // Frame(BytesMut),
+    // Framed(FrameMessage),
+}
+
+#[derive(Debug)]
+pub enum MessageRet {
+    Auth,
+    AuthAck(AuthAck),
+    Hello(Hello),
+    Disconnect(Disconnect),
+    Ping(Ping),
+    Pong(Pong),
+    Ignore,
+    // Frame(BytesMut),
+    // Framed(FrameMessage),
 }
 
 pub struct MessageCodec<'a, R: rand::Rng> {
@@ -38,23 +56,38 @@ impl<'a, R: rand::Rng> MessageCodec<'a, R> {
 impl<'a, R: rand::Rng> Encoder<Message> for MessageCodec<'a, R> {
     type Error = eyre::Error;
 
+    #[instrument(skip_all)]
     fn encode(&mut self, item: Message, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
+        trace!("Sending: {item:?}");
         match item {
             Message::Auth => {
                 self.state = State::AuthAck;
                 let auth = self.connection.generate_auth_message()?;
                 dst.extend_from_slice(&auth);
             }
-            Message::Hello => {
-                let mut hello = self.connection.create_hello();
-                let hello = self.connection.write_frame(&mut hello);
-                dst.extend_from_slice(&hello);
-            }
             Message::AuthAck(_) => {
                 todo!();
             }
-            Message::Frame(data) => {
-                dst.extend_from_slice(&data);
+            Message::Hello => {
+                let mut hello = self.connection.create_hello();
+                println!("Send hello: {hello:02x}");
+                let hello = self.connection.write_frame(&mut hello);
+                dst.extend_from_slice(&hello);
+            }
+            Message::Disconnect => {
+                let mut disconnect = self.connection.create_disconnect();
+                let disconnect = self.connection.write_frame(&mut disconnect);
+                dst.extend_from_slice(&disconnect);
+            }
+            Message::Ping => {
+                let mut ping = self.connection.create_ping();
+                let ping = self.connection.write_frame(&mut ping);
+                dst.extend_from_slice(&ping);
+            }
+            Message::Pong => {
+                let mut pong = self.connection.create_pong();
+                let pong = self.connection.write_frame(&mut pong);
+                dst.extend_from_slice(&pong);
             }
         }
         Ok(())
@@ -62,7 +95,7 @@ impl<'a, R: rand::Rng> Encoder<Message> for MessageCodec<'a, R> {
 }
 
 impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
-    type Item = Message;
+    type Item = MessageRet;
     type Error = eyre::Error;
 
     #[instrument(skip_all)]
@@ -95,40 +128,34 @@ impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
                         .read_auth_ack(&mut buf.split_to(total_size))?;
 
                     self.state = State::Header;
-                    return Ok(Some(Message::AuthAck(auth_ack)));
+                    return Ok(Some(MessageRet::AuthAck(auth_ack)));
                 }
                 State::Header => {
                     if buf.len() < 32 {
                         trace!("Buffer can not hold the header: buf len: {}", buf.len());
-                    }
-
-                    self.connection.read_header(&mut buf.split_to(32));
-
-                    self.state = State::Body;
-                }
-                State::Body => {
-                    if buf.len() < self.connection.body_size() {
-                        trace!(
-                            "Expected {} body, but only have {}",
-                            self.connection.body_size(),
-                            buf.len()
-                        );
+                        trace!("Buffer: {:02x?}", buf);
                         return Ok(None);
                     }
 
-                    let mut data = buf.split_to(self.connection.body_size());
+                    let len = self.connection.read_header(&mut buf.split_to(32))?;
+
+                    self.state = State::Body(len);
+                }
+                State::Body(len) => {
+                    if buf.len() < len {
+                        trace!("Expected {} body, but only have {}", len, buf.len());
+                        return Ok(None);
+                    }
+
+                    let mut data = buf.split_to(len);
                     let mut ret = BytesMut::new();
-                    ret.extend_from_slice(
-                        &self
-                            .connection
-                            .read_body(&mut data, self.connection.body_size())?,
-                    );
+                    ret.extend_from_slice(&self.connection.read_body(&mut data, len)?);
 
                     self.state = State::Header;
 
                     let mut r = ret.clone();
-                    self.connection.read_message(&mut r);
-                    return Ok(Some(Message::Frame(ret)));
+                    let message = self.connection.read_message(&mut r)?;
+                    return Ok(Some(message));
                 }
             }
         }

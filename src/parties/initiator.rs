@@ -3,7 +3,7 @@ use rand::Rng;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
 
 use crate::utils::secrets::generate_restorable_secret;
-use crate::utils::Nonce;
+use crate::utils::{pk2id, NodeId, Nonce};
 
 const NODE_KEY: &str = "eth-node-key";
 
@@ -48,11 +48,13 @@ impl Initiator {
 
     #[cfg(test)]
     pub fn enode(&self) -> Result<crate::enode::Enode> {
-        use crate::utils::pk2id;
-
         let id = pk2id(&self.public_key);
 
         format!("enode://{}@127.0.0.1:40404", id).as_str().parse()
+    }
+
+    pub fn node_id(&self) -> NodeId {
+        pk2id(&self.public_key)
     }
 
     pub fn secret_key(&self) -> &SecretKey {

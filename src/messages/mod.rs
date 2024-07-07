@@ -5,13 +5,46 @@ use secp256k1::{PublicKey, SecretKey};
 
 use crate::utils::{aes_decrypt, ecdh_x, hmac_sha256, key_material};
 
+use self::hello::Hello;
+
 pub mod auth;
 pub mod auth_ack;
 pub mod hello;
 
+#[derive(Debug)]
+pub enum FrameMessage {
+    Hello(Hello),
+    Disconnect(Disconnect),
+    Ping(Ping),
+    Pong(Pong),
+}
+
 #[derive(Debug, RlpEncodable, RlpDecodable)]
 pub struct Disconnect {
     pub reason: usize,
+}
+
+impl std::fmt::Display for Disconnect {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let reason = match self.reason {
+            0x0 => "Disconnected requested",
+            0x1 => "TCP sub-system error",
+            0x2 => "Breach of protocol, e.g. a malformed message, bad RLP, ...",
+            0x3 => "Useless peer",
+            0x4 => "Too many peers",
+            0x5 => "Already connected",
+            0x6 => "Incompatible P2P protocol version",
+            0x7 => "Null node identity received - this is automatically invalid",
+            0x8 => "Client quitting",
+            0x9 => "Unexpected identity in handshake",
+            0xa => "Identity is the same as this node (i.e. connected to itself)",
+            0xb => "Ping timeout",
+            0x10 => "Some other reason specific to a subprotocol",
+            _ => unreachable!(),
+        };
+
+        write!(f, "Disconnect {{ reason: {reason} }}")
+    }
 }
 
 #[derive(Debug, RlpEncodable, RlpDecodable)]
