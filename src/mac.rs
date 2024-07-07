@@ -1,4 +1,4 @@
-//! THIS file is copied from reth
+//! THIS FILE IS COPIED FROM reth
 //!
 //! # Ethereum MAC Module
 //!

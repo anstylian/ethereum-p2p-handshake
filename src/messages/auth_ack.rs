@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 // use crate::utils::PROTOCOL_VERSION;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 // use eyre::Result;
@@ -24,5 +26,16 @@ impl AuthAck {
 
     pub fn id(&self) -> [u8; 64] {
         self.id
+    }
+}
+
+impl Display for AuthAck {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.write_fmt(format_args!(
+            "AuthAck {{ id: 0x{}, nonce: 0x{}, protocol_version: {:02x}}}",
+            hex::encode(self.id),
+            hex::encode(self.nonce),
+            self.protocol_version
+        ))
     }
 }

@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::utils::PROTOCOL_VERSION;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 
@@ -31,10 +33,6 @@ impl Hello {
             id,
         }
     }
-
-    pub fn port(&self) -> u16 {
-        self.port
-    }
 }
 
 impl Capability {
@@ -43,18 +41,47 @@ impl Capability {
     }
 }
 
+impl Display for Hello {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.write_fmt(format_args!(
+            "Hello {{ protocol_version: {}, client_version: {}, capabilities: {:?}, port: {}, id: 0x{} }}",
+            self.protocol_version,
+            self.client_version,
+            self.capabilities,
+            self.port,
+            hex::encode(self.id),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use alloy_rlp::Decodable;
+    use alloy_rlp::{Decodable, Encodable};
+
+    use crate::{
+        messages::hello::Capability, parties::initiator::Initiator, tests::static_random_generator,
+        utils::pk2id,
+    };
 
     use super::Hello;
 
-    #[test]
-    fn parse_hello() {
-        let hx = "f857058b746573742d636c69656e74c6c5836574684480b840a6067e7a0ec8287335252e10fdc83ea98f83c41b86842e34a98674cad491f5a7fecb2e675527f10d7981488a17cfe3f4e560008b4d113e8263703968869f4b45";
-        let mut h = hex::decode(hx).unwrap();
-        let hello = Hello::decode(&mut h.as_slice());
-        println!("{hello:?}");
-        println!("{h:02x?}");
+    #[tokio::test]
+    async fn parse_hello() {
+        let random_generator1 = &mut static_random_generator();
+        let initiator = Initiator::new(random_generator1)
+            .await
+            .expect("Failed to create initiator");
+        let hello_left = Hello::new(
+            "test-client".to_owned(),
+            vec![Capability::new("eth".to_owned(), 68)],
+            30303,
+            *pk2id(initiator.public_key()),
+        );
+
+        let mut buf = vec![];
+        hello_left.encode(&mut buf);
+        let hello_right = Hello::decode(&mut buf.as_slice()).expect("Hello decode failed");
+
+        assert_eq!(hello_left, hello_right);
     }
 }

@@ -24,6 +24,16 @@ impl Initiator {
         Ok(Self::new_inner(secret_key, random_generator))
     }
 
+    // #[cfg(test)]
+    // pub async fn new_test<R: Rng, P: AsRef<std::path::Path>>(
+    //     random_generator: &mut R,
+    //     file_name: P,
+    // ) -> Result<Self> {
+    //     let secret_key = generate_restorable_secret(random_generator, file_name).await?;
+    //
+    //     Ok(Self::new_inner(secret_key, random_generator))
+    // }
+
     fn new_inner<R: Rng>(secret_key: SecretKey, random_generator: &mut R) -> Self {
         let ephemeral_secret_key = SecretKey::new(random_generator);
         let secp = Secp256k1::new();

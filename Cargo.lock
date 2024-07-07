@@ -347,12 +347,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "block-cipher"
-version = "0.99.99"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce54fa052c4e8002fd5fee8a45e8a4a355dee56c7fa0058adedcba3ca260dca1"
-
-[[package]]
 name = "block-padding"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -599,7 +593,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "argh",
- "block-cipher",
  "block-padding",
  "byteorder",
  "bytes",

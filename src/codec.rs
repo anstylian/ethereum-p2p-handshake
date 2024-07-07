@@ -19,19 +19,22 @@ pub enum Message {
     Auth,
     Hello,
     Disconnect,
+    #[allow(dead_code)]
     Ping,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum MessageRet {
+    #[allow(dead_code)]
+    /// Auth is send from the initiator to the recipient
+    /// since we are implementing only the initators part, we are
+    /// never receiving this message
     Auth,
     AuthAck(AuthAck),
     Hello(Hello),
     Disconnect(Disconnect),
     Ping(Ping),
     Ignore,
-    // Frame(BytesMut),
-    // Framed(FrameMessage),
 }
 
 pub struct MessageCodec<'a, R: rand::Rng> {
@@ -51,7 +54,7 @@ impl<'a, R: rand::Rng> MessageCodec<'a, R> {
 impl<'a, R: rand::Rng> Encoder<Message> for MessageCodec<'a, R> {
     type Error = eyre::Error;
 
-    #[instrument(skip_all)]
+    #[instrument(name = "encode", skip_all)]
     fn encode(&mut self, item: Message, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
         trace!("Sending: {item:?}");
         match item {
@@ -74,11 +77,7 @@ impl<'a, R: rand::Rng> Encoder<Message> for MessageCodec<'a, R> {
                 let mut ping = self.connection.create_ping();
                 let ping = self.connection.write_frame(&mut ping);
                 dst.extend_from_slice(&ping);
-            } // Message::Pong => {
-              //     let mut pong = self.connection.create_pong();
-              //     let pong = self.connection.write_frame(&mut pong);
-              //     dst.extend_from_slice(&pong);
-              // }
+            }
         }
         Ok(())
     }
@@ -88,7 +87,8 @@ impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
     type Item = MessageRet;
     type Error = eyre::Error;
 
-    #[instrument(skip_all)]
+    // #[instrument(name = "decode", skip_all, fields(recipient=?self.recipient.address())]
+    #[instrument(name = "decode", skip_all)]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         loop {
             match self.state {
@@ -102,7 +102,7 @@ impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
                     }
 
                     let payload = u16::from_be_bytes([buf[0], buf[1]]) as usize;
-                    let total_size = payload + 2;
+                    let total_size = payload + 2; // plus 2 for the 2 bytes holding the size
 
                     if buf.len() < total_size {
                         trace!(
@@ -122,7 +122,6 @@ impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
                 }
                 State::Header => {
                     trace!("Reading header");
-                    println!("Remaining buffer: {buf:02x}");
                     if buf.len() < 32 {
                         trace!("Buffer can not hold the header: buf len: {}", buf.len());
                         trace!("Buffer: {:02x?}", buf);
@@ -134,7 +133,7 @@ impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
                     self.state = State::Body(len);
                 }
                 State::Body(len) => {
-                    trace!("Reading body");
+                    trace!(body_len=?len, "Reading body");
                     if buf.len() < len {
                         trace!("Expected {} body, but only have {}", len, buf.len());
                         return Ok(None);
@@ -148,7 +147,7 @@ impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
 
                     let mut r = ret.clone();
                     let message = self.connection.read_message(&mut r)?;
-                    trace!("Received message: {:?}", message);
+                    trace!(message=?message, "Received message");
                     return Ok(Some(message));
                 }
             }

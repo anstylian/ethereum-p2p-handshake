@@ -19,7 +19,6 @@ pub async fn generate_restorable_secret<R: Rng, P: AsRef<Path>>(
     secret_backup: P,
 ) -> Result<SecretKey> {
     if secret_backup.as_ref().is_file() {
-        println!("Hello 1");
         let mut file = OpenOptions::new().read(true).open(secret_backup).await?;
         let buf = &mut [0u8; SECRET_KEY_SIZE];
         let n = file.read(buf).await?;
@@ -31,7 +30,6 @@ pub async fn generate_restorable_secret<R: Rng, P: AsRef<Path>>(
         let secret = SecretKey::from_slice(buf)?;
         Ok(secret)
     } else {
-        println!("Hello 2");
         if let Some(parent) = secret_backup.as_ref().parent() {
             create_dir_all(parent).await?;
         }

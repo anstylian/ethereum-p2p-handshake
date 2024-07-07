@@ -24,7 +24,9 @@ use crate::{
     utils::{aes_encrypt, ecdh_x, hmac_sha256, id2pk, key_material, pk2id},
 };
 
-/// This is handling the communication between the initiator and the recipient
+const PING_BYTES: [u8; 3] = [0x1, 0x0, 0xc0];
+
+/// This is handling the encrypted communication between the initiator and the recipient
 pub struct Connection<'a, R: rand::Rng> {
     initiator: &'a Initiator,
     recipient: Recipient,
@@ -63,7 +65,7 @@ impl<'a, R: Rng> Connection<'a, R> {
     #[instrument(skip_all)]
     pub fn generate_auth_message(&mut self) -> Result<BytesMut> {
         let mut auth_body = AuthBody::message(&self.recipient, self.initiator);
-        // add pading
+        // padding
         auth_body.resize(
             auth_body.len() + self.random_generator.gen_range(100..=300),
             0,
@@ -189,42 +191,34 @@ impl<'a, R: Rng> Connection<'a, R> {
                 trace!("Hello bytes: {message:02x?}");
                 let hello: Hello = Hello::decode(&mut message)?;
                 trace!("Hello message from target node: {:?}", hello);
-                return Ok(MessageRet::Hello(hello));
+                Ok(MessageRet::Hello(hello))
             }
             0x1u8 => {
                 trace!("Disconnect bytes: {message:02x?}");
                 let disconnect = Disconnect::decode(&mut message)?;
                 trace!("Disconnect: {:?}", disconnect);
-                return Ok(MessageRet::Disconnect(disconnect));
+                Ok(MessageRet::Disconnect(disconnect))
             }
             0x2u8 => {
                 trace!("Ping bytes: {message:02x?}");
-                if message.starts_with(&[0x1, 0x0, 0xc0]) {
-                    return Ok(MessageRet::Ping(Ping {}));
+                if message.starts_with(&PING_BYTES) {
+                    Ok(MessageRet::Ping(Ping {}))
                 } else {
-                    return Err(eyre!("This is not a ping message: {message:02x?}"));
+                    Err(eyre!("This is not a ping message: {message:02x?}"))
                 }
-                // let message = self.decode_ping(&mut message)?;
-                // let ping = Ping::decode(&mut message)?;
-                // trace!("Ping bytes: {:?}", ping);
             }
             0x3u8 => {
                 trace!("Pong bytes: {message:02x?}");
-                if message.starts_with(&[0x1, 0x0, 0xc0]) {
-                    return Ok(MessageRet::Ping(Ping {}));
+                if message.starts_with(&PING_BYTES) {
+                    Ok(MessageRet::Ping(Ping {}))
                 } else {
-                    return Err(eyre!("This is not a ping message: {message:02x?}"));
+                    Err(eyre!("This is not a ping message: {message:02x?}"))
                 }
-                // self.decode_ping(&mut message)?;
-                // let pong = Ping::decode(&mut message)?;
-                // trace!("Pong bytes: {:?}", pong);
-                // return Ok(MessageRet::Ping(Ping {}));
             }
             id => {
-                println!("unknown id: {id:?}");
-                trace!("unknown bytes: {message:02x?}");
+                trace!("unknown id: {id:?}, unknown bytes: {message:02x?}");
 
-                return Ok(MessageRet::Ignore);
+                Ok(MessageRet::Ignore)
             }
         }
     }
@@ -316,7 +310,7 @@ impl<'a, R: Rng> Connection<'a, R> {
         encrypted[..message.len()].copy_from_slice(message);
 
         self.egress_aes.as_mut().unwrap().apply_keystream(encrypted);
-        self.egress_mac.as_mut().unwrap().update_body(encrypted); // TODO: check this
+        self.egress_mac.as_mut().unwrap().update_body(encrypted);
         let tag = self.egress_mac.as_mut().unwrap().digest();
 
         out.extend_from_slice(tag.as_slice());
@@ -368,23 +362,13 @@ impl<'a, R: Rng> Connection<'a, R> {
         let frame_mac = B128::from_slice(frame_mac);
         self.ingress_mac.as_mut().unwrap().update_body(frame);
         let current_mac = self.ingress_mac.as_mut().unwrap().digest();
-        trace!("current_mac: {:02x}", current_mac);
-        trace!("frame_mac: {:02x}", frame_mac);
         if current_mac != frame_mac {
-            return Err(eyre!("Frame MAC check failed"));
+            return Err(eyre!("Frame MAC check failed. current mac: {current_mac:02x}, frame mac: {frame_mac:02x}"));
         }
 
         self.ingress_aes.as_mut().unwrap().apply_keystream(frame);
 
         Ok(frame.to_vec())
-    }
-
-    #[cfg(test)]
-    pub fn decrypt_message_auth(&mut self, message: &'a mut BytesMut) -> Result<&'a mut [u8]> {
-        let auth_message = self.decrypt_message(message)?;
-
-        Ok(auth_message)
-        // Ok(auth_message)
     }
 
     fn setup_frame(&mut self, incoming: bool) -> Result<()> {
@@ -452,4 +436,11 @@ impl<'a, R: Rng> Connection<'a, R> {
 
         Ok(())
     }
+
+    // #[cfg(test)]
+    // pub fn decrypt_message_auth(&mut self, message: &'a mut BytesMut) -> Result<&'a mut [u8]> {
+    //     let auth_message = self.decrypt_message(message)?;
+    //
+    //     Ok(auth_message)
+    // }
 }

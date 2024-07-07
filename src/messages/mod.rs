@@ -5,20 +5,9 @@ use secp256k1::{PublicKey, SecretKey};
 
 use crate::utils::{aes_decrypt, ecdh_x, hmac_sha256, key_material};
 
-use self::hello::Hello;
-
 pub mod auth;
 pub mod auth_ack;
 pub mod hello;
-// pub mod status;
-
-#[derive(Debug)]
-pub enum FrameMessage {
-    Hello(Hello),
-    Disconnect(Disconnect),
-    Ping(Ping),
-    Pong(Pong),
-}
 
 #[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct Disconnect {
@@ -74,7 +63,6 @@ impl<'a> MessageDecryptor<'a> {
 
         let (auth_data, remaining) = message.split_at_mut(2);
         let auth_data: [u8; 2] = [auth_data[0], auth_data[1]];
-        println!("auth: {:02x?}", auth_data);
         let message_len: i16 = i16::from_be_bytes(auth_data);
 
         let (public_key, remaining) = remaining.split_at_mut(65);
