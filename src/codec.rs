@@ -37,6 +37,15 @@ pub enum MessageRet {
     Ignore,
 }
 
+/// In the codec due to the RLPx Transport Protocol we need to keep state.
+/// The state is needed in two cases:
+/// 1. We initiate the handshake
+/// When we initiate the handshake we need to exchange secrets with the other party
+/// to our establish the session keys.
+/// 2. After we establish the session keys we need to decode frames.
+/// Frames are split into header and body. When we decode the header  
+/// (to know the length of the body we expect), we make changes in our keccak256 MAC state
+/// that we need to preserve.
 pub struct MessageCodec<'a> {
     rlpx: Rlpx<'a>,
     state: State,
@@ -50,6 +59,8 @@ impl<'a> MessageCodec<'a> {
         }
     }
 }
+
+// TODO: make the Codec states more strict. Now its ok because we are using a specific flow
 
 impl<'a> Encoder<Message> for MessageCodec<'a> {
     type Error = eyre::Error;
