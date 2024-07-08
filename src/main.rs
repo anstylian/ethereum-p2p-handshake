@@ -15,16 +15,16 @@ use tokio_util::codec::Framed;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
-    connection::Connection,
     parties::{initiator::Initiator, recipient::Recipient},
+    rlpx::Rlpx,
 };
 
 mod codec;
-mod connection;
 mod enode;
 mod mac;
 mod messages;
 mod parties;
+mod rlpx;
 mod utils;
 
 #[derive(FromArgs, Debug)]
@@ -80,9 +80,10 @@ async fn main() -> Result<()> {
                         bail!("Connection failed with: {e:?}")
                     }
                 };
-                let connection = Connection::new(INITIATOR.get().unwrap(), recipient);
+                let rlpx = Rlpx::new(INITIATOR.get().unwrap(), recipient);
 
-                connection_handler(stream, connection).await
+                // TODO: use timeout
+                connection_handler(stream, rlpx).await
             });
             jh
         })
@@ -102,8 +103,8 @@ async fn main() -> Result<()> {
 }
 
 #[instrument(skip_all, fields(recipient=?stream.peer_addr()?))]
-async fn connection_handler(stream: TcpStream, connection: Connection<'_>) -> Result<()> {
-    let message_codec = MessageCodec::new(connection);
+async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
+    let message_codec = MessageCodec::new(rlpx);
     let mut transport = Framed::new(stream, message_codec);
 
     transport.send(Message::Auth).await?;

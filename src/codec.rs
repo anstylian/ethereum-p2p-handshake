@@ -3,8 +3,8 @@ use tokio_util::codec::{Decoder, Encoder};
 use tracing::{instrument, trace};
 
 use crate::{
-    connection::Connection,
     messages::{auth_ack::AuthAck, hello::Hello, Disconnect, Ping},
+    rlpx::Rlpx,
 };
 
 pub enum State {
@@ -38,14 +38,14 @@ pub enum MessageRet {
 }
 
 pub struct MessageCodec<'a> {
-    connection: Connection<'a>,
+    rlpx: Rlpx<'a>,
     state: State,
 }
 
 impl<'a> MessageCodec<'a> {
-    pub fn new(connection: Connection<'a>) -> Self {
+    pub fn new(rlpx: Rlpx<'a>) -> Self {
         Self {
-            connection,
+            rlpx,
             state: State::Auth,
         }
     }
@@ -60,22 +60,22 @@ impl<'a> Encoder<Message> for MessageCodec<'a> {
         match item {
             Message::Auth => {
                 self.state = State::AuthAck;
-                let auth = self.connection.generate_auth_message()?;
+                let auth = self.rlpx.generate_auth_message()?;
                 dst.extend_from_slice(&auth);
             }
             Message::Hello => {
-                let mut hello = self.connection.create_hello();
-                let hello = self.connection.write_frame(&mut hello);
+                let mut hello = self.rlpx.create_hello();
+                let hello = self.rlpx.write_frame(&mut hello);
                 dst.extend_from_slice(&hello);
             }
             Message::Disconnect => {
-                let mut disconnect = self.connection.create_disconnect();
-                let disconnect = self.connection.write_frame(&mut disconnect);
+                let mut disconnect = self.rlpx.create_disconnect();
+                let disconnect = self.rlpx.write_frame(&mut disconnect);
                 dst.extend_from_slice(&disconnect);
             }
             Message::Ping => {
-                let mut ping = self.connection.create_ping();
-                let ping = self.connection.write_frame(&mut ping);
+                let mut ping = self.rlpx.create_ping();
+                let ping = self.rlpx.write_frame(&mut ping);
                 dst.extend_from_slice(&ping);
             }
         }
@@ -113,9 +113,7 @@ impl<'a> Decoder for MessageCodec<'a> {
                         return Ok(None);
                     }
 
-                    let auth_ack = self
-                        .connection
-                        .read_auth_ack(&mut buf.split_to(total_size))?;
+                    let auth_ack = self.rlpx.read_auth_ack(&mut buf.split_to(total_size))?;
 
                     self.state = State::Header;
                     return Ok(Some(MessageRet::AuthAck(auth_ack)));
@@ -128,7 +126,7 @@ impl<'a> Decoder for MessageCodec<'a> {
                         return Ok(None);
                     }
 
-                    let len = self.connection.read_header(&mut buf.split_to(32))?;
+                    let len = self.rlpx.read_header(&mut buf.split_to(32))?;
 
                     self.state = State::Body(len);
                 }
@@ -141,12 +139,12 @@ impl<'a> Decoder for MessageCodec<'a> {
 
                     let mut data = buf.split_to(len);
                     let mut ret = BytesMut::new();
-                    ret.extend_from_slice(&self.connection.read_body(&mut data, len)?);
+                    ret.extend_from_slice(&self.rlpx.read_body(&mut data, len)?);
 
                     self.state = State::Header;
 
                     let mut r = ret.clone();
-                    let message = self.connection.read_message(&mut r)?;
+                    let message = self.rlpx.read_message(&mut r)?;
                     trace!(message=?message, "Received message");
                     return Ok(Some(message));
                 }

@@ -27,7 +27,7 @@ use crate::{
 const PING_BYTES: [u8; 3] = [0x1, 0x0, 0xc0];
 
 /// This is handling the encrypted communication between the initiator and the recipient
-pub struct Connection<'a> {
+pub struct Rlpx<'a> {
     initiator: &'a Initiator,
     recipient: Recipient,
 
@@ -43,7 +43,7 @@ pub struct Connection<'a> {
     egress_mac: Option<Mac>,
 }
 
-impl<'a> Connection<'a> {
+impl<'a> Rlpx<'a> {
     pub fn new(initiator: &'a Initiator, recipient: Recipient) -> Self {
         Self {
             initiator,
@@ -148,7 +148,7 @@ impl<'a> Connection<'a> {
         // Gives this:
         //
         // warning: this call to `as_ref` does nothing
-        // --> src/connection.rs:156:45
+        // --> src/rlpx.rs:156:45
         //    |
         //156 |         let auth_ack = AuthAck::decode(&mut decrypt_message.as_ref())?;
         //    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^ help: try: `decrypt_message`
@@ -159,7 +159,7 @@ impl<'a> Connection<'a> {
         //    After following clippy is not compiling
         //
         // error[E0308]: mismatched types
-        //   --> src/connection.rs:168:40
+        //   --> src/rlpx.rs:168:40
         //    |
         //168 |         let auth_ack = AuthAck::decode(decrypt_message)?;
         //    |                        --------------- ^^^^^^^^^^^^^^^ expected `&mut &[u8]`, found `&mut [u8]`
