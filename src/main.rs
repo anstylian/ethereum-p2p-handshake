@@ -122,6 +122,9 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
 
     rlpx_transport.send(Message::Auth).await?;
 
+    let mut ping_counter = 10;
+    let mut start = false;
+
     loop {
         match rlpx_transport.next().await {
             Some(request) => match request {
@@ -134,10 +137,10 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
                     info!(?hello, "Hello message received");
                     info!("Handshake is done, we have received the first frame successfully");
                     info!("Sending disconnect and clossing the connection");
-                    rlpx_transport
-                        .send(Message::Disconnect(DisconnectReason::UselessPeers))
-                        .await?;
-                    break;
+                    rlpx_transport.send(Message::SubProtocolStatus).await?;
+
+                    // break;
+                    start = true;
                 }
                 Ok(MessageRet::Disconnect(disconnect)) => {
                     info!(?disconnect, "Disconnect recevived");
@@ -153,7 +156,7 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
                     info!("Ignore unsupported message");
                 }
                 Err(e) => {
-                    error!("Error: {e:?}");
+                    error!("Error!!!: {e:?}");
                     break;
                 }
             },
@@ -162,6 +165,18 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
                 warn!(msg);
                 eyre::bail!(format!("{msg} address: {:?}", recipient_address));
             }
+        }
+
+        if start {
+            rlpx_transport.send(Message::Ping).await?;
+            ping_counter -= 1;
+        }
+
+        if ping_counter == 0 {
+            rlpx_transport
+                .send(Message::Disconnect(DisconnectReason::UselessPeers))
+                .await?;
+            break;
         }
     }
 

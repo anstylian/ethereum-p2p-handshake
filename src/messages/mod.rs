@@ -9,6 +9,7 @@ use crate::utils::{aes_decrypt, ecdh_x, hmac_sha256, key_material};
 pub mod auth;
 pub mod auth_ack;
 pub mod disconnect;
+pub mod ethstatus;
 pub mod hello;
 
 const PING_BYTES: [u8; 3] = [0x1, 0x0, 0xc0];
