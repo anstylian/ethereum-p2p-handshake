@@ -11,12 +11,15 @@
         pkgs = import nixpkgs { inherit system; };
         naersk-lib = pkgs.callPackage naersk {
         };
-      in
-      {
-        defaultPackage = naersk-lib.buildPackage {
-          src = ./.;
-          doDoc = true;
-          doDocFail = true;
+      in rec {
+        packages = {
+          ethereum-p2p-handshake = naersk-lib.buildPackage {
+            src = ./.;
+            doDoc = true;
+            doDocFail = true;
+          };
+
+          default = packages.ethereum-p2p-handshake;
         };
 
         devShell = with pkgs; mkShell {
