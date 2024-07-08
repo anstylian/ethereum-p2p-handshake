@@ -27,7 +27,7 @@ use crate::{
 const PING_BYTES: [u8; 3] = [0x1, 0x0, 0xc0];
 
 /// This is handling the encrypted communication between the initiator and the recipient
-pub struct Connection<'a, R: rand::Rng> {
+pub struct Connection<'a> {
     initiator: &'a Initiator,
     recipient: Recipient,
 
@@ -41,12 +41,10 @@ pub struct Connection<'a, R: rand::Rng> {
 
     ingress_mac: Option<Mac>,
     egress_mac: Option<Mac>,
-
-    random_generator: R,
 }
 
-impl<'a, R: Rng> Connection<'a, R> {
-    pub fn new(initiator: &'a Initiator, recipient: Recipient, random_generator: R) -> Self {
+impl<'a> Connection<'a> {
+    pub fn new(initiator: &'a Initiator, recipient: Recipient) -> Self {
         Self {
             initiator,
             recipient,
@@ -57,7 +55,6 @@ impl<'a, R: Rng> Connection<'a, R> {
             egress_aes: None,
             ingress_mac: None,
             egress_mac: None,
-            random_generator,
         }
     }
 
@@ -65,10 +62,7 @@ impl<'a, R: Rng> Connection<'a, R> {
     pub fn generate_auth_message(&mut self) -> Result<BytesMut> {
         let mut auth_body = AuthBody::message(&self.recipient, self.initiator);
         // padding
-        auth_body.resize(
-            auth_body.len() + self.random_generator.gen_range(100..=300),
-            0,
-        );
+        auth_body.resize(auth_body.len() + rand::thread_rng().gen_range(100..=300), 0);
 
         trace!(
             "Created auth-body unencrypted (this is RLP format with padding): {:02x}",
@@ -108,12 +102,12 @@ impl<'a, R: Rng> Connection<'a, R> {
         )
         .unwrap();
 
-        let secret_key = SecretKey::new(&mut self.random_generator);
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
         let shared_secret = ecdh_x(self.recipient.public_key(), &secret_key);
 
         let (encryption_key, authentication_key) = key_material(shared_secret)?;
 
-        let iv: B128 = self.random_generator.gen::<[u8; 16]>().into();
+        let iv: B128 = rand::thread_rng().gen::<[u8; 16]>().into();
 
         // encrypt message
         let encrypted_message: &mut [u8] = message;

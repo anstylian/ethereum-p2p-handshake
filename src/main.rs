@@ -3,14 +3,16 @@
 //!
 //! The implementation is following the description of [The RLPx Transport Protocol](https://github.com/ethereum/devp2p/blob/master/rlpx.md)
 
+use std::sync::OnceLock;
+
 use argh::FromArgs;
 use codec::{Message, MessageCodec, MessageRet};
 use eyre::{bail, Result};
-use futures::sink::SinkExt;
-use tokio::net::TcpStream;
+use futures::{future::join_all, sink::SinkExt};
+use tokio::{net::TcpStream, task::JoinHandle};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
-use tracing::{debug, error, info, instrument, trace};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
     connection::Connection,
@@ -30,13 +32,15 @@ mod utils;
 struct EthereumHandshake {
     /// ethereum node Id
     #[argh(positional)]
-    enodes: String,
+    enodes: Vec<String>,
 }
+
+static INITIATOR: OnceLock<Initiator> = OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=trace")
+        std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=info")
     }
 
     tracing_subscriber::fmt::init();
@@ -44,6 +48,16 @@ async fn main() -> Result<()> {
     let random_generator = &mut rand::thread_rng();
 
     info!("Starting ethereum handshake only node");
+
+    let initiator = Initiator::new(random_generator).await?;
+    INITIATOR.get_or_init(|| initiator);
+
+    trace!("Initiator: {:?}", INITIATOR);
+    debug!(
+        "Initiator NodeId: {:02x?}",
+        INITIATOR.get().unwrap().node_id()
+    );
+
     let args: EthereumHandshake = argh::from_env();
     info!("Arguments: {args:?}");
 
@@ -51,32 +65,42 @@ async fn main() -> Result<()> {
 
     debug!("Parsed args: {enode:?}");
 
-    let initiator = Initiator::new(random_generator).await?;
-    trace!("Initiator: {initiator:?}");
-    debug!("Initiator NodeId: {:02x?}", initiator.node_id());
+    let tasks: Vec<_> = enode
+        .into_iter()
+        .map(|enode| -> JoinHandle<Result<()>> {
+            let jh = tokio::task::spawn(async move {
+                let recipient = Recipient::new(enode.parse()?)?;
+                trace!("Recipient: {recipient:?}");
 
-    let recipient = Recipient::new(enode.parse()?)?;
-    trace!("Recipient: {recipient:?}");
+                let stream = match recipient.connect().await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        println!("failed here {e:?}");
+                        bail!("connection failed with: {e:?}")
+                    }
+                };
+                let connection = Connection::new(INITIATOR.get().unwrap(), recipient);
 
-    let stream = match recipient.connect().await {
-        Ok(s) => s,
-        Err(e) => {
-            println!("failed here {e:?}");
-            bail!("connection failed with: {e:?}")
-        }
-    };
-    let connection = Connection::new(&initiator, recipient, random_generator);
+                connection_handler(stream, connection).await
+            });
+            jh
+        })
+        .collect();
 
-    connection_handler(stream, connection).await?;
+    let tasks_res = join_all(tasks).await;
+
+    for join_handle in tasks_res {
+        let Ok(Ok(_)) = join_handle else {
+            error!("{join_handle:?}");
+            continue;
+        };
+    }
 
     Ok(())
 }
 
 #[instrument(skip_all, fields(recipient=?stream.peer_addr()?))]
-async fn connection_handler<R: rand::Rng>(
-    stream: TcpStream,
-    connection: Connection<'_, R>,
-) -> Result<()> {
+async fn connection_handler(stream: TcpStream, connection: Connection<'_>) -> Result<()> {
     let message_codec = MessageCodec::new(connection);
     let mut transport = Framed::new(stream, message_codec);
 
@@ -113,7 +137,7 @@ async fn connection_handler<R: rand::Rng>(
                 }
             },
             None => {
-                error!("Stream is finish. Is possible that you tried to reach the same node too frequently. Wait a bit and try again.");
+                warn!("Stream is finish. Is possible that you tried to reach the same node too frequently. Wait a bit and try again.");
                 break;
             }
         }
@@ -128,64 +152,7 @@ async fn connection_handler<R: rand::Rng>(
 mod tests {
     use rand::{Rng, SeedableRng};
 
-    // use crate::{
-    //     connection::Connection,
-    //     parties::{initiator::Initiator, recipient::Recipient},
-    // };
-
     pub fn static_random_generator() -> impl Rng {
         rand_chacha::ChaCha8Rng::seed_from_u64(625)
     }
-
-    // #[tokio::test]
-    // async fn test_drive() {
-    //     if std::env::var_os("RUST_LOG").is_none() {
-    //         std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=trace")
-    //     }
-    //     tracing_subscriber::fmt::init();
-    //
-    //     let random_generator1 = &mut static_random_generator();
-    //     let random_generator2 = &mut static_random_generator();
-    //
-    //     let file1 = "./testing_files/secret1";
-    //     let initiator = Initiator::new_test(random_generator1, file1)
-    //         .await
-    //         .expect("Failed to create initator 1");
-    //
-    //     let file2 = "./testing_files/secret2";
-    //
-    //     // This is just to create a valid public key
-    //     let initiator2 = Initiator::new_test(random_generator1, file2)
-    //         .await
-    //         .expect("Failed to create initator 2");
-    //     let mut recipient: Recipient = initiator2
-    //         .clone()
-    //         .try_into()
-    //         .expect("Failed to create recipient from intiator");
-    //     recipient.port(8080);
-    //     let connected_recipient = recipient.connect().await.expect("Failed to connect");
-    //
-    //     // this is the reverse side so we can decrypt the messeges
-    //     let mut recipient_other: Recipient = initiator
-    //         .clone()
-    //         .try_into()
-    //         .expect("Failed to create recipient for the other side");
-    //     recipient_other.port(8081);
-    //     let connected_recipient_other = recipient_other.connect().await.expect("Failed to connect");
-    //
-    //     let mut connection = Connection::new(&initiator, connected_recipient, random_generator1);
-    //     let mut auth_message = connection
-    //         .generate_auth_message()
-    //         .expect("Failed to create auth message");
-    //
-    //     println!("Encrypted messege: {:02x}", auth_message);
-    //
-    //     let mut connection_other =
-    //         Connection::new(&initiator2, connected_recipient_other, random_generator2);
-    //     connection_other
-    //         .decrypt_message_auth(&mut auth_message)
-    //         .expect("Failed to decrypt auth");
-    //
-    //     // connection.generate_auth_message(random_generator);
-    // }
 }

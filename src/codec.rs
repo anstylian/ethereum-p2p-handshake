@@ -37,13 +37,13 @@ pub enum MessageRet {
     Ignore,
 }
 
-pub struct MessageCodec<'a, R: rand::Rng> {
-    connection: Connection<'a, R>,
+pub struct MessageCodec<'a> {
+    connection: Connection<'a>,
     state: State,
 }
 
-impl<'a, R: rand::Rng> MessageCodec<'a, R> {
-    pub fn new(connection: Connection<'a, R>) -> Self {
+impl<'a> MessageCodec<'a> {
+    pub fn new(connection: Connection<'a>) -> Self {
         Self {
             connection,
             state: State::Auth,
@@ -51,7 +51,7 @@ impl<'a, R: rand::Rng> MessageCodec<'a, R> {
     }
 }
 
-impl<'a, R: rand::Rng> Encoder<Message> for MessageCodec<'a, R> {
+impl<'a> Encoder<Message> for MessageCodec<'a> {
     type Error = eyre::Error;
 
     #[instrument(name = "encode", skip_all)]
@@ -83,7 +83,7 @@ impl<'a, R: rand::Rng> Encoder<Message> for MessageCodec<'a, R> {
     }
 }
 
-impl<'a, R: rand::Rng> Decoder for MessageCodec<'a, R> {
+impl<'a> Decoder for MessageCodec<'a> {
     type Item = MessageRet;
     type Error = eyre::Error;
 
