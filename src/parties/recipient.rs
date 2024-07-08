@@ -43,6 +43,10 @@ impl Recipient {
         Ok(stream)
     }
 
+    pub fn address(&self) -> &SocketAddr {
+        &self.address
+    }
+
     pub fn public_key(&self) -> &PublicKey {
         &self.public_key
     }

@@ -3,18 +3,23 @@
 //!
 //! The implementation is following the description of [The RLPx Transport Protocol](https://github.com/ethereum/devp2p/blob/master/rlpx.md)
 
-use std::sync::OnceLock;
+use std::{sync::OnceLock, time::Duration};
 
 use argh::FromArgs;
 use codec::{Message, MessageCodec, MessageRet};
-use eyre::{bail, Result};
+use eyre::{bail, eyre, Result};
 use futures::{future::join_all, sink::SinkExt};
-use tokio::{net::TcpStream, task::JoinHandle, time::Instant};
+use tokio::{
+    net::TcpStream,
+    task::JoinHandle,
+    time::{self, Instant},
+};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
+    messages::disconnect::DisconnectReason,
     parties::{initiator::Initiator, recipient::Recipient},
     rlpx::Rlpx,
 };
@@ -69,23 +74,27 @@ async fn main() -> Result<()> {
     let tasks: Vec<_> = enode
         .into_iter()
         .map(|enode| -> JoinHandle<Result<()>> {
-            let jh = tokio::task::spawn(async move {
+            tokio::task::spawn(async move {
                 let recipient = Recipient::new(enode.parse()?)?;
                 trace!("Recipient: {recipient:?}");
+                let addr = recipient.address().to_owned();
 
                 let stream = match recipient.connect().await {
                     Ok(s) => s,
                     Err(e) => {
-                        error!("Connection failed with: {e:?}");
+                        error!(
+                            address = ?recipient.address(),
+                            "Connection failed with: {e:?}"
+                        );
                         bail!("Connection failed with: {e:?}")
                     }
                 };
                 let rlpx = Rlpx::new(INITIATOR.get().unwrap(), recipient);
 
-                // TODO: use timeout
-                connection_handler(stream, rlpx).await
-            });
-            jh
+                time::timeout(Duration::from_secs(5), connection_handler(stream, rlpx))
+                    .await
+                    .map_err(|e| eyre!("{:?}: {e:?}", addr))?
+            })
         })
         .collect();
 
@@ -93,10 +102,13 @@ async fn main() -> Result<()> {
     info!("Total elpased time {:#?}", now.elapsed());
 
     for join_handle in tasks_res {
-        let Ok(Ok(_)) = join_handle else {
-            error!("{join_handle:?}");
-            continue;
-        };
+        match join_handle {
+            Err(e) => error!("Join handle error: {e:?}"),
+            Ok(Err(e)) => {
+                error!("{e:?}");
+            }
+            Ok(Ok(_)) => {}
+        }
     }
 
     Ok(())
@@ -104,31 +116,37 @@ async fn main() -> Result<()> {
 
 #[instrument(skip_all, fields(recipient=?stream.peer_addr()?))]
 async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
+    let recipient_address = stream.peer_addr()?;
     let message_codec = MessageCodec::new(rlpx);
-    let mut transport = Framed::new(stream, message_codec);
+    let mut rlpx_transport = Framed::new(stream, message_codec);
 
-    transport.send(Message::Auth).await?;
+    rlpx_transport.send(Message::Auth).await?;
 
     loop {
-        match transport.next().await {
+        match rlpx_transport.next().await {
             Some(request) => match request {
                 Ok(MessageRet::Auth) => unreachable!(),
                 Ok(MessageRet::AuthAck(auth_ack)) => {
                     info!(?auth_ack, "AuthAck message received");
-                    transport.send(Message::Hello).await?;
+                    rlpx_transport.send(Message::Hello).await?;
                 }
                 Ok(MessageRet::Hello(hello)) => {
                     info!(?hello, "Hello message received");
                     info!("Handshake is done, we have received the first frame successfully");
                     info!("Sending disconnect and clossing the connection");
-                    transport.send(Message::Disconnect).await?;
+                    rlpx_transport
+                        .send(Message::Disconnect(DisconnectReason::UselessPeers))
+                        .await?;
                     break;
                 }
                 Ok(MessageRet::Disconnect(disconnect)) => {
                     info!(?disconnect, "Disconnect recevived");
                     break;
                 }
-                Ok(MessageRet::Ping(_)) => {
+                Ok(MessageRet::Ping) => {
+                    info!("Ping recevived");
+                }
+                Ok(MessageRet::Pong) => {
                     info!("Ping recevived");
                 }
                 Ok(MessageRet::Ignore) => {
@@ -140,13 +158,14 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
                 }
             },
             None => {
-                warn!("Stream is finish. Is possible that you tried to reach the same node too frequently. Wait a bit and try again.");
-                break;
+                let msg = "Stream is finish. Is possible that you tried to reach the same node too frequently. Wait a bit and try again.";
+                warn!(msg);
+                eyre::bail!(format!("{msg} address: {:?}", recipient_address));
             }
         }
     }
 
-    transport.close().await?;
+    rlpx_transport.close().await?;
 
     Ok(())
 }

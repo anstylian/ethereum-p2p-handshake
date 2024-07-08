@@ -3,8 +3,14 @@ use tokio_util::codec::{Decoder, Encoder};
 use tracing::{instrument, trace};
 
 use crate::{
-    messages::{auth_ack::AuthAck, hello::Hello, Disconnect, Ping},
+    messages::{
+        auth_ack::AuthAck,
+        disconnect::{Disconnect, DisconnectReason},
+        hello::Hello,
+        Ping,
+    },
     rlpx::Rlpx,
+    utils::pk2id,
 };
 
 pub enum State {
@@ -18,7 +24,7 @@ pub enum State {
 pub enum Message {
     Auth,
     Hello,
-    Disconnect,
+    Disconnect(DisconnectReason), // disconnect with reason
     #[allow(dead_code)]
     Ping,
 }
@@ -33,19 +39,20 @@ pub enum MessageRet {
     AuthAck(AuthAck),
     Hello(Hello),
     Disconnect(Disconnect),
-    Ping(Ping),
+    Ping,
+    Pong,
     Ignore,
 }
 
 /// In the codec due to the RLPx Transport Protocol we need to keep state.
 /// The state is needed in two cases:
 /// 1. We initiate the handshake
-/// When we initiate the handshake we need to exchange secrets with the other party
-/// to our establish the session keys.
+///     When we initiate the handshake we need to exchange secrets with the other party
+///     to our establish the session keys.
 /// 2. After we establish the session keys we need to decode frames.
-/// Frames are split into header and body. When we decode the header  
-/// (to know the length of the body we expect), we make changes in our keccak256 MAC state
-/// that we need to preserve.
+///     Frames are split into header and body. When we decode the header  
+///     (to know the length of the body we expect), we make changes in our keccak256 MAC state
+///     that we need to preserve.
 pub struct MessageCodec<'a> {
     rlpx: Rlpx<'a>,
     state: State,
@@ -75,17 +82,18 @@ impl<'a> Encoder<Message> for MessageCodec<'a> {
                 dst.extend_from_slice(&auth);
             }
             Message::Hello => {
-                let mut hello = self.rlpx.create_hello();
+                let mut hello =
+                    Hello::new_default_values(*pk2id(self.rlpx.initiator_public_key())).encoded();
                 let hello = self.rlpx.write_frame(&mut hello);
                 dst.extend_from_slice(&hello);
             }
-            Message::Disconnect => {
-                let mut disconnect = self.rlpx.create_disconnect();
+            Message::Disconnect(reason) => {
+                let mut disconnect = Disconnect::new(reason).encoded();
                 let disconnect = self.rlpx.write_frame(&mut disconnect);
                 dst.extend_from_slice(&disconnect);
             }
             Message::Ping => {
-                let mut ping = self.rlpx.create_ping();
+                let mut ping = Ping::encoded();
                 let ping = self.rlpx.write_frame(&mut ping);
                 dst.extend_from_slice(&ping);
             }

@@ -1,7 +1,10 @@
 use std::fmt::Display;
 
 use crate::utils::PROTOCOL_VERSION;
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
+use bytes::BytesMut;
+
+const ID: u8 = 0x0;
 
 #[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct Hello {
@@ -19,6 +22,11 @@ pub struct Capability {
 }
 
 impl Hello {
+    pub fn new_default_values(id: [u8; 64]) -> Self {
+        let capabilities = vec![Capability::new("eth".to_string(), 68)];
+        Hello::new("test-client".to_string(), capabilities, 0, id)
+    }
+
     pub fn new(
         client_version: String,
         capabilities: Vec<Capability>,
@@ -32,6 +40,14 @@ impl Hello {
             port,
             id,
         }
+    }
+
+    pub fn encoded(self) -> BytesMut {
+        let mut hello = BytesMut::new();
+        ID.encode(&mut hello);
+        self.encode(&mut hello);
+
+        hello
     }
 }
 

@@ -1,8 +1,8 @@
 use aes::Aes256;
 use alloy_primitives::{B128, B256};
-use alloy_rlp::{Decodable, Encodable};
+use alloy_rlp::Decodable;
 use byteorder::{BigEndian, ByteOrder};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use cipher::{KeyIvInit, StreamCipher};
 use ctr::Ctr64BE;
 use eyre::{eyre, Result};
@@ -15,16 +15,12 @@ use crate::{
     codec::MessageRet,
     mac::Mac,
     messages::{
-        auth::AuthBody,
-        auth_ack::AuthAck,
-        hello::{Capability, Hello},
-        Disconnect, MessageDecryptor, Ping,
+        auth::AuthBody, auth_ack::AuthAck, disconnect::Disconnect, hello::Hello, MessageDecryptor,
+        Ping, Pong,
     },
     parties::{initiator::Initiator, recipient::Recipient},
-    utils::{aes_encrypt, ecdh_x, hmac_sha256, id2pk, key_material, pk2id},
+    utils::{aes_encrypt, ecdh_x, hmac_sha256, id2pk, key_material},
 };
-
-const PING_BYTES: [u8; 3] = [0x1, 0x0, 0xc0];
 
 /// This is handling the encrypted communication between the initiator and the recipient
 pub struct Rlpx<'a> {
@@ -223,16 +219,16 @@ impl<'a> Rlpx<'a> {
             }
             0x2u8 => {
                 trace!("Ping bytes: {message:02x?}");
-                if message.starts_with(&PING_BYTES) {
-                    Ok(MessageRet::Ping(Ping {}))
+                if message.starts_with(Ping::bytes()) {
+                    Ok(MessageRet::Ping)
                 } else {
                     Err(eyre!("This is not a ping message: {message:02x?}"))
                 }
             }
             0x3u8 => {
                 trace!("Pong bytes: {message:02x?}");
-                if message.starts_with(&PING_BYTES) {
-                    Ok(MessageRet::Ping(Ping {}))
+                if message.starts_with(Pong::bytes()) {
+                    Ok(MessageRet::Pong)
                 } else {
                     Err(eyre!("This is not a ping message: {message:02x?}"))
                 }
@@ -245,56 +241,8 @@ impl<'a> Rlpx<'a> {
         }
     }
 
-    pub fn create_hello(&self) -> BytesMut {
-        let mut hello = BytesMut::new();
-        0x0u8.encode(&mut hello);
-        let capabilities = vec![Capability::new("eth".to_string(), 68)];
-        Hello::new(
-            "test-client".to_string(),
-            capabilities,
-            0,
-            *pk2id(self.initiator.public_key()),
-        )
-        .encode(&mut hello);
-
-        hello
-    }
-
-    pub fn create_ping(&self) -> BytesMut {
-        let mut ping = BytesMut::new();
-        0x2u8.encode(&mut ping);
-        ping.put_u8(0x01);
-        ping.put_u8(0x00);
-        ping.put_u8(0xC0);
-
-        ping
-    }
-
-    // fn decode_ping(&self, buf: &mut &'a [u8]) -> Result<&mut &'a [u8]> {
-    //     if buf.starts_with(&[0x1, 0x0, 0xc0]) {
-    //         let (_, res) = buf.split_at_mut(3);
-    //         Ok(res)
-    //     } else {
-    //         Err(eyre!("This is not a ping message: {buf:02x?}"))
-    //     }
-    // }
-
-    // pub fn create_pong(&self) -> BytesMut {
-    //     let mut pong = BytesMut::new();
-    //     0x3u8.encode(&mut pong);
-    //     pong.put_u8(0x01);
-    //     pong.put_u8(0x00);
-    //     pong.put_u8(0xC0);
-    //
-    //     pong
-    // }
-
-    pub fn create_disconnect(&self) -> BytesMut {
-        let mut disconnect = BytesMut::new();
-        0x1u8.encode(&mut disconnect);
-        Disconnect { reason: 0x8 }.encode(&mut disconnect);
-
-        disconnect
+    pub fn initiator_public_key(&self) -> &PublicKey {
+        self.initiator.public_key()
     }
 
     pub fn write_frame(&mut self, message: &mut [u8]) -> BytesMut {
@@ -458,11 +406,4 @@ impl<'a> Rlpx<'a> {
 
         Ok(())
     }
-
-    // #[cfg(test)]
-    // pub fn decrypt_message_auth(&mut self, message: &'a mut BytesMut) -> Result<&'a mut [u8]> {
-    //     let auth_message = self.decrypt_message(message)?;
-    //
-    //     Ok(auth_message)
-    // }
 }

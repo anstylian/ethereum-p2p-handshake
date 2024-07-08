@@ -1,5 +1,6 @@
 use alloy_primitives::{B128, B256};
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::Encodable;
+use bytes::{BufMut, BytesMut};
 use eyre::Result;
 use secp256k1::{PublicKey, SecretKey};
 
@@ -7,41 +8,37 @@ use crate::utils::{aes_decrypt, ecdh_x, hmac_sha256, key_material};
 
 pub mod auth;
 pub mod auth_ack;
+pub mod disconnect;
 pub mod hello;
 
-#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
-pub struct Disconnect {
-    pub reason: usize,
-}
+const PING_BYTES: [u8; 3] = [0x1, 0x0, 0xc0];
 
-impl std::fmt::Display for Disconnect {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let reason = match self.reason {
-            0x0 => "Disconnected requested",
-            0x1 => "TCP sub-system error",
-            0x2 => "Breach of protocol, e.g. a malformed message, bad RLP, ...",
-            0x3 => "Useless peer",
-            0x4 => "Too many peers",
-            0x5 => "Already connected",
-            0x6 => "Incompatible P2P protocol version",
-            0x7 => "Null node identity received - this is automatically invalid",
-            0x8 => "Client quitting",
-            0x9 => "Unexpected identity in handshake",
-            0xa => "Identity is the same as this node (i.e. connected to itself)",
-            0xb => "Ping timeout",
-            0x10 => "Some other reason specific to a subprotocol",
-            _ => unreachable!(),
-        };
+#[derive(Debug, PartialEq, Eq)]
+pub struct Ping {}
 
-        write!(f, "Disconnect {{ reason: {reason} }}")
+#[derive(Debug, PartialEq, Eq)]
+pub struct Pong {}
+
+impl Ping {
+    pub fn bytes<'a>() -> &'a [u8; 3] {
+        &PING_BYTES
+    }
+
+    pub fn encoded() -> BytesMut {
+        // this is snappy encoded
+        let mut ping = BytesMut::new();
+        0x2u8.encode(&mut ping);
+        ping.put_slice(&PING_BYTES);
+
+        ping
     }
 }
 
-#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
-pub struct Ping {}
-
-#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
-pub struct Pong {}
+impl Pong {
+    pub fn bytes<'a>() -> &'a [u8; 3] {
+        &PING_BYTES
+    }
+}
 
 pub struct MessageDecryptor<'a> {
     // Message size after auth-data (2 bytes)
