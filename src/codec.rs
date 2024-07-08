@@ -87,7 +87,6 @@ impl<'a> Decoder for MessageCodec<'a> {
     type Item = MessageRet;
     type Error = eyre::Error;
 
-    // #[instrument(name = "decode", skip_all, fields(recipient=?self.recipient.address())]
     #[instrument(name = "decode", skip_all)]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         loop {
