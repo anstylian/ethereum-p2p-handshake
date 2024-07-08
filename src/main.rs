@@ -9,7 +9,7 @@ use argh::FromArgs;
 use codec::{Message, MessageCodec, MessageRet};
 use eyre::{bail, Result};
 use futures::{future::join_all, sink::SinkExt};
-use tokio::{net::TcpStream, task::JoinHandle};
+use tokio::{net::TcpStream, task::JoinHandle, time::Instant};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -49,6 +49,7 @@ async fn main() -> Result<()> {
     let random_generator = &mut rand::thread_rng();
 
     info!("Starting ethereum handshake only node");
+    let now = Instant::now();
 
     let initiator = Initiator::new(random_generator).await?;
     INITIATOR.get_or_init(|| initiator);
@@ -88,6 +89,7 @@ async fn main() -> Result<()> {
         .collect();
 
     let tasks_res = join_all(tasks).await;
+    info!("Total elpased time {:#?}", now.elapsed());
 
     for join_handle in tasks_res {
         let Ok(Ok(_)) = join_handle else {
