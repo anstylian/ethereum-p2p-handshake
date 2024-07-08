@@ -30,7 +30,7 @@ mod utils;
 #[derive(FromArgs, Debug)]
 /// Implementatation of the Ethereum P2P handshake
 struct EthereumHandshake {
-    /// ethereum node Id
+    /// ethereum Node Id
     #[argh(positional)]
     enodes: Vec<String>,
 }
@@ -42,6 +42,7 @@ async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=info")
     }
+    let args: EthereumHandshake = argh::from_env();
 
     tracing_subscriber::fmt::init();
 
@@ -58,7 +59,6 @@ async fn main() -> Result<()> {
         INITIATOR.get().unwrap().node_id()
     );
 
-    let args: EthereumHandshake = argh::from_env();
     info!("Arguments: {args:?}");
 
     let enode = args.enodes;
@@ -75,8 +75,8 @@ async fn main() -> Result<()> {
                 let stream = match recipient.connect().await {
                     Ok(s) => s,
                     Err(e) => {
-                        println!("failed here {e:?}");
-                        bail!("connection failed with: {e:?}")
+                        error!("Connection failed with: {e:?}");
+                        bail!("Connection failed with: {e:?}")
                     }
                 };
                 let connection = Connection::new(INITIATOR.get().unwrap(), recipient);
