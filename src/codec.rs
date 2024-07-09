@@ -1,17 +1,18 @@
-use alloy_rlp::Encodable;
+use alloy_rlp::{Decodable, Encodable};
 use bytes::BytesMut;
 use eyre::Result;
-use snap::raw::Encoder as SnapEncoder;
+use snap::raw::{Decoder as SnapDecoder, Encoder as SnapEncoder};
 use tokio_util::codec::{Decoder, Encoder};
-use tracing::{instrument, trace};
+use tracing::{debug, instrument, trace};
 
 use crate::{
     messages::{
+        self,
         auth_ack::AuthAck,
-        disconnect::{Disconnect, DisconnectReason},
+        disconnect::{self, Disconnect, DisconnectReason},
         ethstatus::EthStatus,
-        hello::Hello,
-        Ping,
+        hello::{self, Hello},
+        Ping, Pong,
     },
     rlpx::Rlpx,
     utils::pk2id,
@@ -29,7 +30,7 @@ pub enum Message {
     Auth,
     Hello,
     Disconnect(DisconnectReason), // disconnect with reason
-    SubProtocolStatus,
+    SubProtocolStatus(EthStatus),
     #[allow(dead_code)]
     Ping,
 }
@@ -47,6 +48,7 @@ pub enum MessageRet {
     Ping,
     Pong,
     Ignore,
+    EthStatus(EthStatus),
 }
 
 #[derive(Debug)]
@@ -57,9 +59,9 @@ pub enum Id {
 }
 
 impl Id {
-    pub fn id(self) -> u8 {
+    pub fn id(&self) -> u8 {
         match self {
-            Id::P2pCapability(id) => id,
+            Id::P2pCapability(id) => *id,
             Id::Other(id) => id + 0x10,
         }
     }
@@ -88,6 +90,8 @@ pub struct MessageCodec<'a> {
     rlpx: Rlpx<'a>,
     state: State,
     snap_encoder: SnapEncoder,
+    snap_decoder: SnapDecoder,
+    use_snappy: bool,
 }
 
 impl<'a> MessageCodec<'a> {
@@ -96,6 +100,8 @@ impl<'a> MessageCodec<'a> {
             rlpx,
             state: State::Auth,
             snap_encoder: SnapEncoder::new(),
+            snap_decoder: SnapDecoder::new(),
+            use_snappy: false,
         }
     }
 
@@ -110,6 +116,105 @@ impl<'a> MessageCodec<'a> {
         compressed[0] = message_id.id();
 
         Ok(compressed)
+    }
+
+    #[instrument(skip_all)]
+    fn snappy_decompress(&mut self, input: &[u8]) -> Result<BytesMut> {
+        let len = snap::raw::decompress_len(&input[..])?;
+        tracing::debug!("decompress len: {len:?}");
+        let mut decompress = BytesMut::zeroed(len + 1);
+        // TODO: handle decompress size
+
+        self.snap_decoder.decompress(&input, &mut decompress)?;
+
+        Ok(decompress)
+    }
+
+    fn first_zero_from_tail(v: &[u8]) -> usize {
+        let mut idx = v.len() - 1;
+
+        while idx > 0 {
+            if v[idx - 1] == 0 {
+                idx -= 1;
+            } else {
+                break;
+            }
+        }
+
+        idx
+    }
+
+    #[instrument(skip_all)]
+    fn read_message(&mut self, message: &mut BytesMut) -> Result<MessageRet> {
+        trace!("Message bytes: {:02x}", message);
+
+        let (mut message_id, mut message) = message.split_at(1);
+        let message_id: u8 = u8::decode(&mut message_id)?;
+        tracing::debug!("message_id: {:?}", message_id);
+
+        match message_id {
+            hello::ID => {
+                trace!("Hello bytes: {message:02x?}");
+                let hello: Hello = Hello::decode(&mut message)?;
+                trace!("Hello message from target node: {:?}", hello);
+
+                self.use_snappy = true;
+
+                Ok(MessageRet::Hello(hello))
+            }
+            disconnect::ID => {
+                tracing::debug!("Disconnect bytes: {message:02x?}");
+                let idx = Self::first_zero_from_tail(&mut message);
+
+                let buf = match self.snappy_decompress(&message[..idx]) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        debug!("Disconnect failed to decode using snappy: {e:?}");
+                        BytesMut::from(message)
+                    }
+                };
+
+                let disconnect = Disconnect::decode(&mut buf.as_ref())?;
+                trace!("Disconnect: {}", disconnect);
+                Ok(MessageRet::Disconnect(disconnect))
+            }
+            messages::PING_ID => {
+                trace!("Ping bytes: {message:02x?}");
+                if message.starts_with(Ping::bytes()) {
+                    Ok(MessageRet::Ping)
+                } else {
+                    Err(eyre::eyre!("This is not a ping message: {message:02x?}"))
+                }
+            }
+            messages::PONG_ID => {
+                trace!("Pong bytes: {message:02x?}");
+                if message.starts_with(Pong::bytes()) {
+                    Ok(MessageRet::Pong)
+                } else {
+                    Err(eyre::eyre!("This is not a ping message: {message:02x?}"))
+                }
+            }
+            id => {
+                let ii: Id = id.into();
+
+                if ii.id() == 16 {
+                    tracing::debug!("Start decoding EthStatus: len: {:?}", message.len());
+                    let idx = Self::first_zero_from_tail(&mut message);
+                    println!("message: {message:02x?}");
+                    println!("idx: {idx:?}");
+                    // let b = message[..idx].to_vec();
+                    let buf = self.snappy_decompress(&message[..idx])?;
+                    tracing::debug!("buf: {buf:02x}");
+                    let eth_status = EthStatus::decode(&mut buf.as_ref())?;
+                    tracing::debug!("decoded eth_status: {:#?}", eth_status);
+                    return Ok(MessageRet::EthStatus(eth_status));
+                } else {
+                    tracing::warn!("unknown id: {id:?}");
+                }
+
+                Ok(MessageRet::Ignore)
+            }
+        }
     }
 }
 
@@ -133,18 +238,13 @@ impl<'a> Encoder<Message> for MessageCodec<'a> {
                 let hello = self.rlpx.write_frame(&mut hello);
                 dst.extend_from_slice(&hello);
             }
-            // Message::Disconnect(reason) => {
-            //     let mut disconnect = Disconnect::new(reason).encoded();
-            //     let disconnect = self.rlpx.write_frame(&mut disconnect);
-            //     dst.extend_from_slice(&disconnect);
-            // }
             Message::Ping => {
                 let mut ping = Ping::encoded();
                 let ping = self.rlpx.write_frame(&mut ping);
                 dst.extend_from_slice(&ping);
             }
-            Message::SubProtocolStatus => {
-                let status = EthStatus::new();
+            Message::SubProtocolStatus(status) => {
+                // let status = EthStatus::new();
                 let mut status_rlp = BytesMut::new();
                 0x0u8.encode(&mut status_rlp);
                 status.encode(&mut status_rlp);
@@ -225,7 +325,7 @@ impl<'a> Decoder for MessageCodec<'a> {
                     self.state = State::Header;
 
                     let mut r = ret.clone();
-                    let message = self.rlpx.read_message(&mut r)?;
+                    let message = self.read_message(&mut r)?;
                     trace!(message=?message, "Received message");
                     return Ok(Some(message));
                 }

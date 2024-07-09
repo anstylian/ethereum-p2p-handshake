@@ -19,6 +19,7 @@ use crate::{
         auth::AuthBody,
         auth_ack::AuthAck,
         disconnect::{self, Disconnect},
+        ethstatus::EthStatus,
         hello::{self, Hello},
         MessageDecryptor, Ping, Pong,
     },
@@ -199,69 +200,6 @@ impl<'a> Rlpx<'a> {
         let m = unencrypted_auth.decrypt(encryption_key);
 
         Ok(m)
-    }
-
-    fn truncate_zeros(v: &mut &[u8]) -> usize {
-        let mut idx = v.len() - 1;
-
-        while idx > 0 {
-            if v[idx - 1] == 0 {
-                idx -= 1;
-            } else {
-                break;
-            }
-        }
-        idx
-    }
-
-    pub fn read_message(&mut self, message: &mut BytesMut) -> Result<MessageRet> {
-        trace!("Message bytes: {:02x}", message);
-
-        let (mut message_id, mut message) = message.split_at(1);
-        let message_id: u8 = u8::decode(&mut message_id)?;
-        trace!("message_id: {:?}", message_id);
-
-        match message_id {
-            hello::ID => {
-                trace!("Hello bytes: {message:02x?}");
-                let hello: Hello = Hello::decode(&mut message)?;
-                trace!("Hello message from target node: {:?}", hello);
-                Ok(MessageRet::Hello(hello))
-            }
-            disconnect::ID => {
-                trace!("Disconnect bytes: {message:02x?}");
-                println!("--->HERE");
-                let mut snap_decoder = snap::raw::Decoder::new();
-                let mut buf = BytesMut::zeroed(2);
-                let idx = Self::truncate_zeros(&mut message);
-                snap_decoder.decompress(&message[..idx], &mut buf)?;
-                let disconnect = Disconnect::decode(&mut buf.as_ref())?;
-                trace!("Disconnect: {}", disconnect);
-                Ok(MessageRet::Disconnect(disconnect))
-            }
-            messages::PING_ID => {
-                trace!("Ping bytes: {message:02x?}");
-                if message.starts_with(Ping::bytes()) {
-                    Ok(MessageRet::Ping)
-                } else {
-                    Err(eyre!("This is not a ping message: {message:02x?}"))
-                }
-            }
-            messages::PONG_ID => {
-                trace!("Pong bytes: {message:02x?}");
-                if message.starts_with(Pong::bytes()) {
-                    Ok(MessageRet::Pong)
-                } else {
-                    Err(eyre!("This is not a ping message: {message:02x?}"))
-                }
-            }
-            id => {
-                let ii: Id = id.into();
-                tracing::warn!("unknown id: {id:?}, unknown bytes: {message:02x?}, {ii:?}");
-
-                Ok(MessageRet::Ignore)
-            }
-        }
     }
 
     pub fn initiator_public_key(&self) -> &PublicKey {

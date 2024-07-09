@@ -136,15 +136,13 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
                 Ok(MessageRet::Hello(hello)) => {
                     info!(?hello, "Hello message received");
                     info!("Handshake is done, we have received the first frame successfully");
-                    info!("Sending disconnect and clossing the connection");
+                    // info!("Sending disconnect and clossing the connection");
                     // rlpx_transport.send(Message::Ping).await?;
-                    rlpx_transport.send(Message::SubProtocolStatus).await?;
 
                     // break;
-                    start = true;
                 }
                 Ok(MessageRet::Disconnect(disconnect)) => {
-                    info!(?disconnect, "Disconnect recevived");
+                    info!("Disconnect recevived: {}", disconnect);
                     break;
                 }
                 Ok(MessageRet::Ping) => {
@@ -155,6 +153,15 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
                 }
                 Ok(MessageRet::Ignore) => {
                     info!("Ignore unsupported message");
+                }
+                Ok(MessageRet::EthStatus(eth_status)) => {
+                    let mut my_eth_status = eth_status;
+
+                    rlpx_transport
+                        .send(Message::SubProtocolStatus(my_eth_status))
+                        .await?;
+
+                    start = true;
                 }
                 Err(e) => {
                     error!("Error!!!: {e:?}");
@@ -175,7 +182,7 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
 
         if ping_counter == 0 {
             rlpx_transport
-                .send(Message::Disconnect(DisconnectReason::UselessPeers))
+                .send(Message::Disconnect(DisconnectReason::TooManyPeers))
                 .await?;
             break;
         }
