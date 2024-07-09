@@ -1,20 +1,17 @@
-use aes::cipher::KeyIvInit;
-use aes::cipher::StreamCipher;
-use aes::Aes128;
-use alloy_primitives::B128;
-use alloy_primitives::B256;
+use aes::{
+    cipher::{KeyIvInit, StreamCipher},
+    Aes128,
+};
+use alloy_primitives::{B128, B256};
 use ctr::Ctr64BE;
-use eyre::eyre;
-use eyre::Result;
+use eyre::{eyre, Result};
 use hmac::{Hmac, Mac};
 use secp256k1::PublicKey;
 
 pub mod secrets;
-pub use alloy_primitives::B256 as Nonce;
-pub use alloy_primitives::B512 as NodeId;
+pub use alloy_primitives::{B256 as Nonce, B512 as NodeId};
 use secp256k1::SecretKey;
-use sha2::Digest;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 pub const SECP256K1_TAG_PUBKEY_UNCOMPRESSED: u8 = 4;
 

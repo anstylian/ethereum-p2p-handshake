@@ -11,14 +11,13 @@ use crate::{
         self,
         auth_ack::AuthAck,
         disconnect::{self, Disconnect},
-        ethstatus::EthStatus,
         hello::{self, Hello},
         Ping, Pong,
     },
     rlpx::Rlpx,
 };
 
-pub enum State {
+enum State {
     Auth,
     AuthAck,
     Header,
@@ -34,23 +33,6 @@ pub enum Message {
     Ping,
     Pong,
     SubProtocolMessage(BytesMut),
-    // SubProtocolStatus(EthStatus),
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum MessageRet {
-    #[allow(dead_code)]
-    /// Auth is send from the initiator to the recipient
-    /// since we are implementing only the initators part, we are
-    /// never receiving this message
-    Auth,
-    AuthAck(AuthAck),
-    Hello(Hello),
-    Disconnect(Disconnect),
-    Ping,
-    Pong,
-    Ignore,
-    EthStatus(EthStatus),
 }
 
 #[derive(Debug)]
@@ -118,7 +100,6 @@ impl<'a> MessageCodec<'a> {
         Ok(compressed)
     }
 
-    #[instrument(skip_all)]
     fn snappy_decompress(&mut self, input: &[u8]) -> Result<BytesMut> {
         let len = snap::raw::decompress_len(input)?;
         let mut decompress = BytesMut::zeroed(len + 1);

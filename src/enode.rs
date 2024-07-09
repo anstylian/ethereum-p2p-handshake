@@ -1,7 +1,9 @@
 use alloy_primitives::hex::FromHex;
 use eyre::Result;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::str::FromStr;
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    str::FromStr,
+};
 
 use crate::utils::NodeId;
 

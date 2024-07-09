@@ -1,14 +1,11 @@
 use alloy_primitives::B256;
 use eyre::{eyre, Result};
 use secp256k1::PublicKey;
-use std::net::SocketAddr;
-use std::time::Duration;
-use tokio::net::TcpStream;
-use tokio::time::timeout;
+use std::{net::SocketAddr, time::Duration};
+use tokio::{net::TcpStream, time::timeout};
 use tracing::{debug, instrument};
 
-use crate::enode::Enode;
-use crate::utils::id2pk;
+use crate::{enode::Enode, utils::id2pk};
 
 /// Connection timeout in seconds
 const CONNECTION_TIMEOUT: u64 = 30;
@@ -70,13 +67,6 @@ impl Recipient {
     pub fn set_ephemeral_public_key(&mut self, public_key: PublicKey) {
         self.ephemeral_public_key = Some(public_key);
     }
-
-    // #[cfg(test)]
-    // pub fn port(&mut self, port: u16) {
-    //     use std::net::{IpAddr, Ipv4Addr};
-    //
-    //     self.address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-    // }
 }
 
 #[cfg(test)]
