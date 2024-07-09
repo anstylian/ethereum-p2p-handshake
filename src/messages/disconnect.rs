@@ -4,8 +4,8 @@ use bytes::BytesMut;
 pub const ID: u8 = 0x1;
 
 #[repr(u8)]
-#[derive(Debug)]
 #[allow(dead_code)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DisconnectReason {
     DisconnectReqiested = 0x0_u8,
     TcpSubSystemError = 0x1_u8,

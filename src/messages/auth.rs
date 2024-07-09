@@ -16,14 +16,14 @@ use crate::{
 /// auth -> E(remote-pubk, S(ephemeral-privk, static-shared-secret ^ nonce) || H(ephemeral-pubk) || pubk || nonce || 0x0)
 /// static-shared-secret = ecdh.agree(privkey, remote-pubk)
 #[derive(Debug, RlpEncodable)]
-pub struct AuthBody<'a> {
+pub struct Auth<'a> {
     signature: &'a [u8; 65],
     initiator_public_key: &'a [u8; 64],
     initiator_nonde: &'a [u8; 32],
     auth_version: usize,
 }
 
-impl<'a> AuthBody<'a> {
+impl<'a> Auth<'a> {
     /// Add message to buffer
     pub fn message(recipient: &Recipient, initiator: &Initiator) -> BytesMut {
         //generate signiture
@@ -44,7 +44,7 @@ impl<'a> AuthBody<'a> {
         let id = pk2id(initiator.public_key());
 
         let mut buf = BytesMut::new();
-        AuthBody {
+        Auth {
             signature: &signature,
             initiator_public_key: &id,
             initiator_nonde: initiator.nonce(),

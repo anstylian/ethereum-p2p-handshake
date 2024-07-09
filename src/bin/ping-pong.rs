@@ -3,25 +3,28 @@
 //!
 //! The implementation is following the description of [The RLPx Transport Protocol](https://github.com/ethereum/devp2p/blob/master/rlpx.md)
 
-use std::{sync::OnceLock, time::Duration};
+use std::{net::SocketAddr, sync::OnceLock, time::Duration};
 
 use argh::FromArgs;
 use eyre::{bail, eyre, Result};
 use futures::{future::join_all, sink::SinkExt};
 use tokio::{
-    net::TcpStream,
     task::JoinHandle,
     time::{self, Instant},
 };
 use tokio_stream::StreamExt;
-use tokio_util::codec::Framed;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use ethereum_p2p_handshake::{
-    codec::{Message, MessageCodec, MessageRet},
-    messages::disconnect::DisconnectReason,
+    codec::Message,
+    messages::{
+        decode_subprotocol_message,
+        disconnect::{Disconnect, DisconnectReason},
+        SubProtocolMessage,
+    },
     parties::{initiator::Initiator, recipient::Recipient},
     rlpx::Rlpx,
+    RlpxTransport,
 };
 
 #[derive(FromArgs, Debug)]
@@ -37,7 +40,7 @@ static INITIATOR: OnceLock<Initiator> = OnceLock::new();
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=debug")
+        std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=trace")
     }
     let args: EthereumHandshake = argh::from_env();
 
@@ -83,9 +86,14 @@ async fn main() -> Result<()> {
                 };
                 let rlpx = Rlpx::new(INITIATOR.get().unwrap(), recipient);
 
-                time::timeout(Duration::from_secs(5), connection_handler(stream, rlpx))
-                    .await
-                    .map_err(|e| eyre!("{:?}: {e:?}", addr))?
+                let transport = time::timeout(
+                    Duration::from_secs(5),
+                    ethereum_p2p_handshake::rlpx_transport(stream, rlpx),
+                )
+                .await
+                .map_err(|e| eyre!("{:?}: {e:?}", addr))??;
+
+                ping_pong(transport, addr).await
             })
         })
         .collect();
@@ -106,75 +114,79 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-#[instrument(skip_all, fields(recipient=?stream.peer_addr()?))]
-async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
-    let recipient_address = stream.peer_addr()?;
-    let message_codec = MessageCodec::new(rlpx);
-    let mut rlpx_transport = Framed::new(stream, message_codec);
-
-    rlpx_transport.send(Message::Auth).await?;
-
+#[instrument(skip_all)]
+async fn ping_pong<'a>(transport: RlpxTransport<'a>, addr: SocketAddr) -> Result<()> {
+    let mut transport = transport;
     let mut ping_counter = 10;
-    let mut start = false;
 
     loop {
-        match rlpx_transport.next().await {
-            Some(request) => match request {
-                Ok(MessageRet::Auth) => unreachable!(),
-                Ok(MessageRet::AuthAck(auth_ack)) => {
-                    info!(?auth_ack, "AuthAck message received");
-                    rlpx_transport.send(Message::Hello).await?;
-                }
-                Ok(MessageRet::Hello(hello)) => {
-                    info!(?hello, "Hello message received");
-                    info!("Handshake is done, we have received the first frame successfully");
-                }
-                Ok(MessageRet::Disconnect(disconnect)) => {
-                    info!("Disconnect recevived: {}", disconnect);
-                    break;
-                }
-                Ok(MessageRet::Ping) => {
-                    info!("Ping recevived");
-                }
-                Ok(MessageRet::Pong) => {
-                    info!("Ping recevived");
-                }
-                Ok(MessageRet::Ignore) => {
-                    info!("Ignore unsupported message");
-                }
-                Ok(MessageRet::EthStatus(eth_status)) => {
-                    rlpx_transport
-                        .send(Message::SubProtocolStatus(eth_status))
-                        .await?;
+        match transport.next().await {
+            Some(request) => {
+                match request {
+                    Ok(message) => {
+                        match message {
+                            Message::Auth => unreachable!(), // This is not supported yet
+                            Message::AuthAck(_) => {
+                                unreachable!()
+                            }
+                            Message::Hello(_) => {
+                                unreachable!()
+                            }
+                            Message::Disconnect(disconnect) => {
+                                info!("Disconnect recevived: {}", disconnect);
+                                break;
+                            }
+                            Message::Ping => {
+                                info!("Ping received during handshake. Sending Pong.");
+                                transport.send(Message::Pong).await?;
+                                ping_counter -= 1;
+                            }
+                            Message::Pong => {
+                                info!("Pong received during handshake. Sending Ping");
+                                transport.send(Message::Ping).await?;
+                                ping_counter -= 1;
+                            }
+                            Message::SubProtocolMessage(message) => {
+                                info!("SubProtocolMessage received during handshake.");
+                                let mut message = message;
+                                let message = decode_subprotocol_message(&mut message)?;
 
-                    start = true;
+                                if let Some(SubProtocolMessage::EthStatus(eth_status)) = message {
+                                    transport
+                                        .send(Message::SubProtocolMessage(eth_status.encoded()))
+                                        .await?;
+                                } else {
+                                    info!("Unsupported message received. Ignore");
+                                }
+
+                                transport.send(Message::Ping).await?;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error!!!: {e:?}");
+                        break;
+                    }
                 }
-                Err(e) => {
-                    error!("Error!!!: {e:?}");
-                    break;
-                }
-            },
+            }
             None => {
                 let msg = "Stream is finish. Is possible that you tried to reach the same node too frequently. Wait a bit and try again.";
                 warn!(msg);
-                eyre::bail!(format!("{msg} address: {:?}", recipient_address));
+                eyre::bail!(format!("{msg} address: {:?}", addr));
             }
         }
 
-        if start {
-            rlpx_transport.send(Message::Ping).await?;
-            ping_counter -= 1;
-        }
-
         if ping_counter == 0 {
-            rlpx_transport
-                .send(Message::Disconnect(DisconnectReason::TooManyPeers))
+            transport
+                .send(Message::Disconnect(Disconnect::new(
+                    DisconnectReason::TooManyPeers,
+                )))
                 .await?;
             break;
         }
     }
 
-    rlpx_transport.close().await?;
+    transport.close().await?;
 
     Ok(())
 }

@@ -1,10 +1,16 @@
 use alloy_primitives::{B128, B256};
-use alloy_rlp::Encodable;
+use alloy_rlp::{Decodable, Encodable};
 use bytes::{BufMut, BytesMut};
 use eyre::Result;
 use secp256k1::{PublicKey, SecretKey};
+use tracing::warn;
 
-use crate::utils::{aes_decrypt, ecdh_x, hmac_sha256, key_material};
+use crate::{
+    codec::Id,
+    utils::{aes_decrypt, ecdh_x, hmac_sha256, key_material},
+};
+
+use self::ethstatus::EthStatus;
 
 pub mod auth;
 pub mod auth_ack;
@@ -30,7 +36,7 @@ impl Ping {
     pub fn encoded() -> BytesMut {
         // this is snappy encoded
         let mut ping = BytesMut::new();
-        0x2u8.encode(&mut ping);
+        PING_ID.encode(&mut ping);
         ping.put_slice(&PING_BYTES);
 
         ping
@@ -40,6 +46,15 @@ impl Ping {
 impl Pong {
     pub const fn bytes<'a>() -> &'a [u8; 3] {
         &PING_BYTES
+    }
+
+    pub fn encoded() -> BytesMut {
+        // this is snappy encoded
+        let mut ping = BytesMut::new();
+        PONG_ID.encode(&mut ping);
+        ping.put_slice(&PING_BYTES);
+
+        ping
     }
 }
 
@@ -106,5 +121,24 @@ impl<'a> MessageDecryptor<'a> {
         let decrypted_data = self.encrypted_message;
         aes_decrypt(encryption_key, decrypted_data, iv);
         decrypted_data
+    }
+}
+
+#[repr(u8)]
+pub enum SubProtocolMessage {
+    EthStatus(EthStatus) = 0,
+}
+pub fn decode_subprotocol_message(message: &mut BytesMut) -> Result<Option<SubProtocolMessage>> {
+    let id: Id = message[0].into();
+
+    match id.id() {
+        ethstatus::ID => {
+            let eth_status = EthStatus::decode(&mut message[1..].as_ref())?;
+            Ok(Some(SubProtocolMessage::EthStatus(eth_status)))
+        }
+        id => {
+            warn!(id, "Subprotocol Message received is not supported");
+            Ok(None)
+        }
     }
 }

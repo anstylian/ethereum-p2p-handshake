@@ -13,7 +13,7 @@ use tracing::{instrument, trace};
 
 use crate::{
     mac::Mac,
-    messages::{auth::AuthBody, auth_ack::AuthAck, MessageDecryptor},
+    messages::{auth::Auth, auth_ack::AuthAck, MessageDecryptor},
     parties::{initiator::Initiator, recipient::Recipient},
     utils::{aes_encrypt, ecdh_x, hmac_sha256, id2pk, key_material},
 };
@@ -52,7 +52,7 @@ impl<'a> Rlpx<'a> {
 
     #[instrument(skip_all)]
     pub fn generate_auth_message(&mut self) -> Result<BytesMut> {
-        let mut auth_body = AuthBody::message(&self.recipient, self.initiator);
+        let mut auth_body = Auth::message(&self.recipient, self.initiator);
         // padding
         auth_body.resize(auth_body.len() + rand::thread_rng().gen_range(100..=300), 0);
 

@@ -7,21 +7,17 @@ use std::{sync::OnceLock, time::Duration};
 
 use argh::FromArgs;
 use eyre::{bail, eyre, Result};
-use futures::{future::join_all, sink::SinkExt};
+use futures::future::join_all;
 use tokio::{
-    net::TcpStream,
     task::JoinHandle,
     time::{self, Instant},
 };
-use tokio_stream::StreamExt;
-use tokio_util::codec::Framed;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, trace};
 
 use ethereum_p2p_handshake::{
-    codec::{Message, MessageCodec, MessageRet},
-    messages::disconnect::DisconnectReason,
     parties::{initiator::Initiator, recipient::Recipient},
     rlpx::Rlpx,
+    RlpxTransport,
 };
 
 #[derive(FromArgs, Debug)]
@@ -37,7 +33,10 @@ static INITIATOR: OnceLock<Initiator> = OnceLock::new();
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=debug")
+        std::env::set_var(
+            "RUST_LOG",
+            "warn,ethereum_p2p_handshake=debug,handshake=info",
+        )
     }
     let args: EthereumHandshake = argh::from_env();
 
@@ -65,7 +64,7 @@ async fn main() -> Result<()> {
 
     let tasks: Vec<_> = enode
         .into_iter()
-        .map(|enode| -> JoinHandle<Result<()>> {
+        .map(|enode| -> JoinHandle<Result<RlpxTransport>> {
             tokio::task::spawn(async move {
                 let recipient = Recipient::new(enode.parse()?)?;
                 trace!("Recipient: {recipient:?}");
@@ -83,9 +82,12 @@ async fn main() -> Result<()> {
                 };
                 let rlpx = Rlpx::new(INITIATOR.get().unwrap(), recipient);
 
-                time::timeout(Duration::from_secs(5), connection_handler(stream, rlpx))
-                    .await
-                    .map_err(|e| eyre!("{:?}: {e:?}", addr))?
+                time::timeout(
+                    Duration::from_secs(5),
+                    ethereum_p2p_handshake::rlpx_transport(stream, rlpx),
+                )
+                .await
+                .map_err(|e| eyre!("{:?}: {e:?}", addr))?
             })
         })
         .collect();
@@ -102,79 +104,6 @@ async fn main() -> Result<()> {
             Ok(Ok(_)) => {}
         }
     }
-
-    Ok(())
-}
-
-#[instrument(skip_all, fields(recipient=?stream.peer_addr()?))]
-async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
-    let recipient_address = stream.peer_addr()?;
-    let message_codec = MessageCodec::new(rlpx);
-    let mut rlpx_transport = Framed::new(stream, message_codec);
-
-    rlpx_transport.send(Message::Auth).await?;
-
-    let mut ping_counter = 10;
-    let mut start = false;
-
-    loop {
-        match rlpx_transport.next().await {
-            Some(request) => match request {
-                Ok(MessageRet::Auth) => unreachable!(),
-                Ok(MessageRet::AuthAck(auth_ack)) => {
-                    info!(?auth_ack, "AuthAck message received");
-                    rlpx_transport.send(Message::Hello).await?;
-                }
-                Ok(MessageRet::Hello(hello)) => {
-                    info!(?hello, "Hello message received");
-                    info!("Handshake is done, we have received the first frame successfully");
-                }
-                Ok(MessageRet::Disconnect(disconnect)) => {
-                    info!("Disconnect recevived: {}", disconnect);
-                    break;
-                }
-                Ok(MessageRet::Ping) => {
-                    info!("Ping recevived");
-                }
-                Ok(MessageRet::Pong) => {
-                    info!("Ping recevived");
-                }
-                Ok(MessageRet::Ignore) => {
-                    info!("Ignore unsupported message");
-                }
-                Ok(MessageRet::EthStatus(eth_status)) => {
-                    rlpx_transport
-                        .send(Message::SubProtocolStatus(eth_status))
-                        .await?;
-
-                    start = true;
-                }
-                Err(e) => {
-                    error!("Error!!!: {e:?}");
-                    break;
-                }
-            },
-            None => {
-                let msg = "Stream is finish. Is possible that you tried to reach the same node too frequently. Wait a bit and try again.";
-                warn!(msg);
-                eyre::bail!(format!("{msg} address: {:?}", recipient_address));
-            }
-        }
-
-        if start {
-            rlpx_transport.send(Message::Ping).await?;
-            ping_counter -= 1;
-        }
-
-        if ping_counter == 0 {
-            rlpx_transport
-                .send(Message::Disconnect(DisconnectReason::TooManyPeers))
-                .await?;
-            break;
-        }
-    }
-
-    rlpx_transport.close().await?;
 
     Ok(())
 }
