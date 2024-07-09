@@ -12,17 +12,8 @@ use sha2::Digest;
 use tracing::{instrument, trace};
 
 use crate::{
-    codec::{Id, MessageRet},
     mac::Mac,
-    messages::{
-        self,
-        auth::AuthBody,
-        auth_ack::AuthAck,
-        disconnect::{self, Disconnect},
-        ethstatus::EthStatus,
-        hello::{self, Hello},
-        MessageDecryptor, Ping, Pong,
-    },
+    messages::{auth::AuthBody, auth_ack::AuthAck, MessageDecryptor},
     parties::{initiator::Initiator, recipient::Recipient},
     utils::{aes_encrypt, ecdh_x, hmac_sha256, id2pk, key_material},
 };

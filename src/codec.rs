@@ -91,7 +91,6 @@ pub struct MessageCodec<'a> {
     state: State,
     snap_encoder: SnapEncoder,
     snap_decoder: SnapDecoder,
-    use_snappy: bool,
 }
 
 impl<'a> MessageCodec<'a> {
@@ -101,7 +100,6 @@ impl<'a> MessageCodec<'a> {
             state: State::Auth,
             snap_encoder: SnapEncoder::new(),
             snap_decoder: SnapDecoder::new(),
-            use_snappy: false,
         }
     }
 
@@ -120,17 +118,16 @@ impl<'a> MessageCodec<'a> {
 
     #[instrument(skip_all)]
     fn snappy_decompress(&mut self, input: &[u8]) -> Result<BytesMut> {
-        let len = snap::raw::decompress_len(&input[..])?;
-        tracing::debug!("decompress len: {len:?}");
+        let len = snap::raw::decompress_len(input)?;
         let mut decompress = BytesMut::zeroed(len + 1);
         // TODO: handle decompress size
 
-        self.snap_decoder.decompress(&input, &mut decompress)?;
+        self.snap_decoder.decompress(input, &mut decompress)?;
 
         Ok(decompress)
     }
 
-    fn first_zero_from_tail(v: &[u8]) -> usize {
+    fn last_zero_from_tail(v: &[u8]) -> usize {
         let mut idx = v.len() - 1;
 
         while idx > 0 {
@@ -150,32 +147,30 @@ impl<'a> MessageCodec<'a> {
 
         let (mut message_id, mut message) = message.split_at(1);
         let message_id: u8 = u8::decode(&mut message_id)?;
-        tracing::debug!("message_id: {:?}", message_id);
+        debug!("message_id: {:?}", message_id);
 
         match message_id {
             hello::ID => {
                 trace!("Hello bytes: {message:02x?}");
                 let hello: Hello = Hello::decode(&mut message)?;
-                trace!("Hello message from target node: {:?}", hello);
-
-                self.use_snappy = true;
+                debug!("Hello message from target node: {:?}", hello);
 
                 Ok(MessageRet::Hello(hello))
             }
             disconnect::ID => {
                 tracing::debug!("Disconnect bytes: {message:02x?}");
-                let idx = Self::first_zero_from_tail(&mut message);
+                let idx = Self::last_zero_from_tail(message);
 
                 let buf = match self.snappy_decompress(&message[..idx]) {
                     Ok(b) => b,
                     Err(e) => {
-                        debug!("Disconnect failed to decode using snappy: {e:?}");
+                        trace!("Disconnect failed to decode using snappy: {e:?}. Try to decode directly from rlp");
                         BytesMut::from(message)
                     }
                 };
 
                 let disconnect = Disconnect::decode(&mut buf.as_ref())?;
-                trace!("Disconnect: {}", disconnect);
+                debug!("Disconnect: {}", disconnect);
                 Ok(MessageRet::Disconnect(disconnect))
             }
             messages::PING_ID => {
@@ -183,7 +178,7 @@ impl<'a> MessageCodec<'a> {
                 if message.starts_with(Ping::bytes()) {
                     Ok(MessageRet::Ping)
                 } else {
-                    Err(eyre::eyre!("This is not a ping message: {message:02x?}"))
+                    eyre::bail!("This is not a ping message: {message:02x?}")
                 }
             }
             messages::PONG_ID => {
@@ -191,28 +186,24 @@ impl<'a> MessageCodec<'a> {
                 if message.starts_with(Pong::bytes()) {
                     Ok(MessageRet::Pong)
                 } else {
-                    Err(eyre::eyre!("This is not a ping message: {message:02x?}"))
+                    eyre::bail!("This is not a ping message: {message:02x?}")
                 }
             }
             id => {
-                let ii: Id = id.into();
+                let id: Id = id.into();
 
-                if ii.id() == 16 {
-                    tracing::debug!("Start decoding EthStatus: len: {:?}", message.len());
-                    let idx = Self::first_zero_from_tail(&mut message);
-                    println!("message: {message:02x?}");
-                    println!("idx: {idx:?}");
-                    // let b = message[..idx].to_vec();
+                if id.id() == 16 {
+                    debug!("Start decoding EthStatus: len: {:?}", message.len());
+
+                    let idx = Self::last_zero_from_tail(message);
                     let buf = self.snappy_decompress(&message[..idx])?;
-                    tracing::debug!("buf: {buf:02x}");
                     let eth_status = EthStatus::decode(&mut buf.as_ref())?;
-                    tracing::debug!("decoded eth_status: {:#?}", eth_status);
-                    return Ok(MessageRet::EthStatus(eth_status));
+
+                    Ok(MessageRet::EthStatus(eth_status))
                 } else {
                     tracing::warn!("unknown id: {id:?}");
+                    Ok(MessageRet::Ignore)
                 }
-
-                Ok(MessageRet::Ignore)
             }
         }
     }
@@ -244,7 +235,6 @@ impl<'a> Encoder<Message> for MessageCodec<'a> {
                 dst.extend_from_slice(&ping);
             }
             Message::SubProtocolStatus(status) => {
-                // let status = EthStatus::new();
                 let mut status_rlp = BytesMut::new();
                 0x0u8.encode(&mut status_rlp);
                 status.encode(&mut status_rlp);

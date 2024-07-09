@@ -136,10 +136,6 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
                 Ok(MessageRet::Hello(hello)) => {
                     info!(?hello, "Hello message received");
                     info!("Handshake is done, we have received the first frame successfully");
-                    // info!("Sending disconnect and clossing the connection");
-                    // rlpx_transport.send(Message::Ping).await?;
-
-                    // break;
                 }
                 Ok(MessageRet::Disconnect(disconnect)) => {
                     info!("Disconnect recevived: {}", disconnect);
@@ -155,10 +151,8 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
                     info!("Ignore unsupported message");
                 }
                 Ok(MessageRet::EthStatus(eth_status)) => {
-                    let mut my_eth_status = eth_status;
-
                     rlpx_transport
-                        .send(Message::SubProtocolStatus(my_eth_status))
+                        .send(Message::SubProtocolStatus(eth_status))
                         .await?;
 
                     start = true;
