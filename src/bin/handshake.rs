@@ -6,7 +6,6 @@
 use std::{sync::OnceLock, time::Duration};
 
 use argh::FromArgs;
-use codec::{Message, MessageCodec, MessageRet};
 use eyre::{bail, eyre, Result};
 use futures::{future::join_all, sink::SinkExt};
 use tokio::{
@@ -18,19 +17,12 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::{
+use ethereum_p2p_handshake::{
+    codec::{Message, MessageCodec, MessageRet},
     messages::disconnect::DisconnectReason,
     parties::{initiator::Initiator, recipient::Recipient},
     rlpx::Rlpx,
 };
-
-mod codec;
-mod enode;
-mod mac;
-mod messages;
-mod parties;
-mod rlpx;
-mod utils;
 
 #[derive(FromArgs, Debug)]
 /// Implementatation of the Ethereum P2P handshake
@@ -185,13 +177,4 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
     rlpx_transport.close().await?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use rand::{Rng, SeedableRng};
-
-    pub fn static_random_generator() -> impl Rng {
-        rand_chacha::ChaCha8Rng::seed_from_u64(625)
-    }
 }
