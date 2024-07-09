@@ -49,7 +49,8 @@ pub enum MessageRet {
     Ignore,
 }
 
-enum Id {
+#[derive(Debug)]
+pub enum Id {
     #[allow(dead_code)]
     P2pCapability(u8),
     Other(u8),
@@ -60,6 +61,16 @@ impl Id {
         match self {
             Id::P2pCapability(id) => id,
             Id::Other(id) => id + 0x10,
+        }
+    }
+}
+
+impl From<u8> for Id {
+    fn from(id: u8) -> Self {
+        if id < 0x10 {
+            Id::P2pCapability(id)
+        } else {
+            Id::Other(id - 0x10)
         }
     }
 }

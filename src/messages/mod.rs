@@ -13,6 +13,8 @@ pub mod ethstatus;
 pub mod hello;
 
 const PING_BYTES: [u8; 3] = [0x1, 0x0, 0xc0];
+pub const PING_ID: u8 = 0x2;
+pub const PONG_ID: u8 = 0x3;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ping {}
@@ -21,7 +23,7 @@ pub struct Ping {}
 pub struct Pong {}
 
 impl Ping {
-    pub fn bytes<'a>() -> &'a [u8; 3] {
+    pub const fn bytes<'a>() -> &'a [u8; 3] {
         &PING_BYTES
     }
 
@@ -36,7 +38,7 @@ impl Ping {
 }
 
 impl Pong {
-    pub fn bytes<'a>() -> &'a [u8; 3] {
+    pub const fn bytes<'a>() -> &'a [u8; 3] {
         &PING_BYTES
     }
 }

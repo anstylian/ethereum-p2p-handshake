@@ -4,7 +4,7 @@ use crate::utils::PROTOCOL_VERSION;
 use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
 use bytes::BytesMut;
 
-const ID: u8 = 0x0;
+pub const ID: u8 = 0x0;
 
 #[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct Hello {

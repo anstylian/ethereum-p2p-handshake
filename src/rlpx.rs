@@ -12,11 +12,15 @@ use sha2::Digest;
 use tracing::{instrument, trace};
 
 use crate::{
-    codec::MessageRet,
+    codec::{Id, MessageRet},
     mac::Mac,
     messages::{
-        auth::AuthBody, auth_ack::AuthAck, disconnect::Disconnect, hello::Hello, MessageDecryptor,
-        Ping, Pong,
+        self,
+        auth::AuthBody,
+        auth_ack::AuthAck,
+        disconnect::{self, Disconnect},
+        hello::{self, Hello},
+        MessageDecryptor, Ping, Pong,
     },
     parties::{initiator::Initiator, recipient::Recipient},
     utils::{aes_encrypt, ecdh_x, hmac_sha256, id2pk, key_material},
@@ -197,6 +201,19 @@ impl<'a> Rlpx<'a> {
         Ok(m)
     }
 
+    fn truncate_zeros(v: &mut &[u8]) -> usize {
+        let mut idx = v.len() - 1;
+
+        while idx > 0 {
+            if v[idx - 1] == 0 {
+                idx -= 1;
+            } else {
+                break;
+            }
+        }
+        idx
+    }
+
     pub fn read_message(&mut self, message: &mut BytesMut) -> Result<MessageRet> {
         trace!("Message bytes: {:02x}", message);
 
@@ -205,19 +222,24 @@ impl<'a> Rlpx<'a> {
         trace!("message_id: {:?}", message_id);
 
         match message_id {
-            0x0u8 => {
+            hello::ID => {
                 trace!("Hello bytes: {message:02x?}");
                 let hello: Hello = Hello::decode(&mut message)?;
                 trace!("Hello message from target node: {:?}", hello);
                 Ok(MessageRet::Hello(hello))
             }
-            0x1u8 => {
+            disconnect::ID => {
                 trace!("Disconnect bytes: {message:02x?}");
-                let disconnect = Disconnect::decode(&mut message)?;
-                trace!("Disconnect: {:?}", disconnect);
+                println!("--->HERE");
+                let mut snap_decoder = snap::raw::Decoder::new();
+                let mut buf = BytesMut::zeroed(2);
+                let idx = Self::truncate_zeros(&mut message);
+                snap_decoder.decompress(&message[..idx], &mut buf)?;
+                let disconnect = Disconnect::decode(&mut buf.as_ref())?;
+                trace!("Disconnect: {}", disconnect);
                 Ok(MessageRet::Disconnect(disconnect))
             }
-            0x2u8 => {
+            messages::PING_ID => {
                 trace!("Ping bytes: {message:02x?}");
                 if message.starts_with(Ping::bytes()) {
                     Ok(MessageRet::Ping)
@@ -225,7 +247,7 @@ impl<'a> Rlpx<'a> {
                     Err(eyre!("This is not a ping message: {message:02x?}"))
                 }
             }
-            0x3u8 => {
+            messages::PONG_ID => {
                 trace!("Pong bytes: {message:02x?}");
                 if message.starts_with(Pong::bytes()) {
                     Ok(MessageRet::Pong)
@@ -234,7 +256,8 @@ impl<'a> Rlpx<'a> {
                 }
             }
             id => {
-                trace!("unknown id: {id:?}, unknown bytes: {message:02x?}");
+                let ii: Id = id.into();
+                tracing::warn!("unknown id: {id:?}, unknown bytes: {message:02x?}, {ii:?}");
 
                 Ok(MessageRet::Ignore)
             }

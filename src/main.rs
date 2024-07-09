@@ -45,7 +45,7 @@ static INITIATOR: OnceLock<Initiator> = OnceLock::new();
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=info")
+        std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=trace")
     }
     let args: EthereumHandshake = argh::from_env();
 
@@ -137,6 +137,7 @@ async fn connection_handler(stream: TcpStream, rlpx: Rlpx<'_>) -> Result<()> {
                     info!(?hello, "Hello message received");
                     info!("Handshake is done, we have received the first frame successfully");
                     info!("Sending disconnect and clossing the connection");
+                    rlpx_transport.send(Message::Ping).await?;
                     rlpx_transport.send(Message::SubProtocolStatus).await?;
 
                     // break;

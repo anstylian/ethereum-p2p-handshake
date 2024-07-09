@@ -1,7 +1,7 @@
 use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
 use bytes::BytesMut;
 
-const ID: u8 = 0x1;
+pub const ID: u8 = 0x1;
 
 #[repr(u8)]
 #[derive(Debug)]
