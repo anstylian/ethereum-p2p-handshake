@@ -40,7 +40,10 @@ static INITIATOR: OnceLock<Initiator> = OnceLock::new();
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", "warn,ethereum_p2p_handshake=trace")
+        std::env::set_var(
+            "RUST_LOG",
+            "warn,ethereum_p2p_handshake=info,ping_pong=info",
+        );
     }
     let args: EthereumHandshake = argh::from_env();
 
@@ -137,17 +140,17 @@ async fn ping_pong<'a>(transport: RlpxTransport<'a>, addr: SocketAddr) -> Result
                                 break;
                             }
                             Message::Ping => {
-                                info!("Ping received during handshake. Sending Pong.");
+                                info!("Ping received. Sending Pong.");
                                 transport.send(Message::Pong).await?;
                                 ping_counter -= 1;
                             }
                             Message::Pong => {
-                                info!("Pong received during handshake. Sending Ping");
+                                info!("Pong received. Sending Ping");
                                 transport.send(Message::Ping).await?;
                                 ping_counter -= 1;
                             }
                             Message::SubProtocolMessage(message) => {
-                                info!("SubProtocolMessage received during handshake.");
+                                info!("SubProtocolMessage received.");
                                 let mut message = message;
                                 let message = decode_subprotocol_message(&mut message)?;
 

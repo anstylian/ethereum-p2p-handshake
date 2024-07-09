@@ -7,7 +7,7 @@ use rlpx::Rlpx;
 use tokio::net::TcpStream;
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
-use tracing::{error, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 use crate::{messages::hello::Hello, utils::pk2id};
 
@@ -61,8 +61,8 @@ async fn handshake(transport: &mut RlpxTransport<'_>, recipient_address: SocketA
                                 transport.send(Message::Hello(hello)).await?;
                             }
                             Message::Hello(hello) => {
-                                trace!(?hello, "Hello message received");
-                                trace!("Handshake is done, we have received the first frame successfully");
+                                debug!(?hello, "Hello message received");
+                                debug!("Handshake is done, we have received the first frame successfully");
                                 break;
                             }
                             Message::Disconnect(disconnect) => {

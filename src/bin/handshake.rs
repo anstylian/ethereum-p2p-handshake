@@ -17,7 +17,6 @@ use tracing::{debug, error, info, trace};
 use ethereum_p2p_handshake::{
     parties::{initiator::Initiator, recipient::Recipient},
     rlpx::Rlpx,
-    RlpxTransport,
 };
 
 #[derive(FromArgs, Debug)]
@@ -35,8 +34,8 @@ async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var(
             "RUST_LOG",
-            "warn,ethereum_p2p_handshake=debug,handshake=info",
-        )
+            "warn,ethereum_p2p_handshake=error,handshake=info",
+        );
     }
     let args: EthereumHandshake = argh::from_env();
 
@@ -64,7 +63,7 @@ async fn main() -> Result<()> {
 
     let tasks: Vec<_> = enode
         .into_iter()
-        .map(|enode| -> JoinHandle<Result<RlpxTransport>> {
+        .map(|enode| -> JoinHandle<Result<()>> {
             tokio::task::spawn(async move {
                 let recipient = Recipient::new(enode.parse()?)?;
                 trace!("Recipient: {recipient:?}");
@@ -87,7 +86,11 @@ async fn main() -> Result<()> {
                     ethereum_p2p_handshake::rlpx_transport(stream, rlpx),
                 )
                 .await
-                .map_err(|e| eyre!("{:?}: {e:?}", addr))?
+                .map_err(|e| eyre!("{:?}: {e:?}", addr))??;
+
+                info!(?addr, "Handshake completed succesfully");
+
+                Ok(())
             })
         })
         .collect();
