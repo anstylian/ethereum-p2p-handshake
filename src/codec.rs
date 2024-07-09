@@ -57,7 +57,7 @@ pub enum Id {
 }
 
 impl Id {
-    fn id(self) -> u8 {
+    pub fn id(self) -> u8 {
         match self {
             Id::P2pCapability(id) => id,
             Id::Other(id) => id + 0x10,
