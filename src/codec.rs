@@ -75,6 +75,7 @@ pub struct MessageCodec<'a> {
     state: State,
     snap_encoder: SnapEncoder,
     snap_decoder: SnapDecoder,
+    remote_hello: Option<Hello>, // This one is keeped only as a proof that the handshake happend
 }
 
 impl<'a> MessageCodec<'a> {
@@ -84,6 +85,7 @@ impl<'a> MessageCodec<'a> {
             state: State::Auth,
             snap_encoder: SnapEncoder::new(),
             snap_decoder: SnapDecoder::new(),
+            remote_hello: None,
         }
     }
 
@@ -138,6 +140,7 @@ impl<'a> MessageCodec<'a> {
                 let hello: Hello = Hello::decode(&mut message)?;
                 debug!("Hello message from target node: {:?}", hello);
 
+                self.remote_hello = Some(hello.clone());
                 Ok(Message::Hello(hello))
             }
             disconnect::ID => {
@@ -202,6 +205,10 @@ impl<'a> MessageCodec<'a> {
 
     pub(crate) fn initiator_public_key(&self) -> &PublicKey {
         self.rlpx.initiator_public_key()
+    }
+
+    pub fn hello(&self) -> Option<&Hello> {
+        self.remote_hello.as_ref()
     }
 }
 

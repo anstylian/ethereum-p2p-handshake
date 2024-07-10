@@ -6,7 +6,7 @@ use bytes::BytesMut;
 
 pub const ID: u8 = 0x0;
 
-#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
+#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq, Clone)]
 pub struct Hello {
     protocol_version: u8,
     client_version: String,
@@ -15,7 +15,7 @@ pub struct Hello {
     id: [u8; 64],
 }
 
-#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
+#[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq, Clone)]
 pub struct Capability {
     pub name: String,
     pub version: usize,

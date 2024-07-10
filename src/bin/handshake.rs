@@ -81,13 +81,14 @@ async fn main() -> Result<()> {
                 };
                 let rlpx = Rlpx::new(INITIATOR.get().unwrap(), recipient);
 
-                time::timeout(
+                let transport = time::timeout(
                     Duration::from_secs(5),
                     ethereum_p2p_handshake::rlpx_transport(stream, rlpx),
                 )
                 .await
                 .map_err(|e| eyre!("{:?}: {e:?}", addr))??;
 
+                info!(?addr, "Hello message: {:?}", transport.codec().hello());
                 info!(?addr, "Handshake completed succesfully");
 
                 Ok(())
