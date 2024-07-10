@@ -1,5 +1,6 @@
 use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
 use bytes::BytesMut;
+use eyre::{eyre, Result};
 
 pub const ID: u8 = 0x1;
 
@@ -40,6 +41,29 @@ impl Disconnect {
         self.encode(&mut disconnect);
 
         disconnect
+    }
+}
+
+impl TryFrom<u8> for DisconnectReason {
+    type Error = eyre::Error;
+
+    fn try_from(value: u8) -> Result<Self> {
+        match value {
+            0x0 => Ok(DisconnectReason::DisconnectReqiested),
+            0x1 => Ok(DisconnectReason::TcpSubSystemError),
+            0x2 => Ok(DisconnectReason::BreackOfProtocol),
+            0x3 => Ok(DisconnectReason::UselessPeers),
+            0x4 => Ok(DisconnectReason::TooManyPeers),
+            0x5 => Ok(DisconnectReason::AlreadyConnected),
+            0x6 => Ok(DisconnectReason::IncompatibleP2pProtocolVersion),
+            0x7 => Ok(DisconnectReason::NullNodeId),
+            0x8 => Ok(DisconnectReason::ClientQuitting),
+            0x9 => Ok(DisconnectReason::UnexpectedIdentityInHandshake),
+            0xa => Ok(DisconnectReason::IdentityIsTheSameAsThisNode),
+            0xb => Ok(DisconnectReason::PingTimeout),
+            0x10 => Ok(DisconnectReason::Other),
+            _ => Err(eyre!("Unknonw disconnect reason received")),
+        }
     }
 }
 

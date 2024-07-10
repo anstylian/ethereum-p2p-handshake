@@ -148,13 +148,22 @@ impl<'a> MessageCodec<'a> {
                     Ok(b) => b,
                     Err(e) => {
                         trace!("Disconnect failed to decode using snappy: {e:?}. Try to decode directly from rlp");
-                        BytesMut::from(message)
+                        BytesMut::from(message) // THIS is useless, most probaply
                     }
                 };
 
-                let disconnect = Disconnect::decode(&mut buf.as_ref())?;
-                debug!("Disconnect: {}", disconnect);
-                Ok(Message::Disconnect(disconnect))
+                match Disconnect::decode(&mut buf.as_ref()) {
+                    Err(e) => {
+                        trace!("Decoding Disconnect failed, appling a hack for geth. Error: {e:?}");
+                        if buf[1] == 0 {
+                            let disc = Disconnect::new(buf[0].try_into()?);
+                            Ok(Message::Disconnect(disc))
+                        } else {
+                            Err(eyre::eyre!("Decoding Disconnect failed: {e:?}"))
+                        }
+                    }
+                    Ok(disc) => Ok(Message::Disconnect(disc)),
+                }
             }
             messages::PING_ID => {
                 trace!("Ping bytes: {message:02x?}");
