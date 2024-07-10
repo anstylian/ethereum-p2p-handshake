@@ -593,6 +593,7 @@ dependencies = [
  "sha2",
  "sha3",
  "snap",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tokio-util",

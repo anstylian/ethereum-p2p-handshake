@@ -5,13 +5,13 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::{Bytes, BytesMut};
 use cipher::{KeyIvInit, StreamCipher};
 use ctr::Ctr64BE;
-use eyre::{eyre, Result};
 use rand::Rng;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use sha2::Digest;
 use tracing::{instrument, trace};
 
 use crate::{
+    error::{Error, Result},
     mac::Mac,
     messages::{auth::Auth, auth_ack::AuthAck, MessageDecryptor},
     parties::{initiator::Initiator, recipient::Recipient},
@@ -122,7 +122,7 @@ impl<'a> Rlpx<'a> {
         out.extend_from_slice(d.as_ref());
 
         if out.len() == total_size.into() {
-            eyre::bail!("The encrypted message size({:?}) does not match the expected size({total_size:?}).", out.len());
+            Error::AuthEncryptSizeFailed(out.len(), total_size);
         }
 
         Ok(total_size)
@@ -242,8 +242,8 @@ impl<'a> Rlpx<'a> {
 
     pub fn read_header(&mut self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 32 {
-            return Err(eyre::eyre!(
-                "Header is too small. Needs at lease 32 bytes for header + mac"
+            return Err(Error::FrameHeader(
+                "Header is too small. Needs at lease 32 bytes for header + mac",
             ));
         }
 
@@ -256,7 +256,7 @@ impl<'a> Rlpx<'a> {
         self.ingress_mac.as_mut().unwrap().update_header(&header);
         let current_mac = self.ingress_mac.as_mut().unwrap().digest();
         if current_mac != mac {
-            return Err(eyre!("Header MAC check failed"));
+            return Err(Error::HeaderMac(current_mac, mac));
         }
 
         self.ingress_aes
@@ -264,7 +264,7 @@ impl<'a> Rlpx<'a> {
             .unwrap()
             .apply_keystream(header.as_mut_slice());
         if header.as_slice().len() < 3 {
-            return Err(eyre!("Invalid header"));
+            return Err(Error::FrameHeader("Invalid header"));
         }
 
         let mut frame_size = (BigEndian::read_uint(header.as_ref(), 3) + 16) as usize; // frame size + 16 bytes Frame MAC
@@ -285,7 +285,7 @@ impl<'a> Rlpx<'a> {
         self.ingress_mac.as_mut().unwrap().update_body(frame);
         let current_mac = self.ingress_mac.as_mut().unwrap().digest();
         if current_mac != frame_mac {
-            return Err(eyre!("Frame MAC check failed. current mac: {current_mac:02x}, frame mac: {frame_mac:02x}"));
+            return Err(Error::BodyMac(current_mac, frame_mac));
         }
 
         self.ingress_aes.as_mut().unwrap().apply_keystream(frame);

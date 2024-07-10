@@ -1,12 +1,12 @@
 use alloy_rlp::Decodable;
 use bytes::{BufMut, BytesMut};
-use eyre::Result;
 use secp256k1::PublicKey;
 use snap::raw::{Decoder as SnapDecoder, Encoder as SnapEncoder};
 use tokio_util::codec::{Decoder, Encoder};
 use tracing::{debug, instrument, trace};
 
 use crate::{
+    error::{Error, Result},
     messages::{
         self,
         auth_ack::AuthAck,
@@ -156,12 +156,14 @@ impl<'a> MessageCodec<'a> {
 
                 match Disconnect::decode(&mut buf.as_ref()) {
                     Err(e) => {
-                        trace!("Decoding Disconnect failed, appling a hack for geth. Error: {e:?}");
                         if buf[1] == 0 {
+                            trace!(
+                                "Decoding Disconnect failed, appling a hack for geth. Error: {e:?}"
+                            );
                             let disc = Disconnect::new(buf[0].try_into()?);
                             Ok(Message::Disconnect(disc))
                         } else {
-                            Err(eyre::eyre!("Decoding Disconnect failed: {e:?}"))
+                            Err(Error::DecodeDisconnect(e))
                         }
                     }
                     Ok(disc) => Ok(Message::Disconnect(disc)),
@@ -172,7 +174,7 @@ impl<'a> MessageCodec<'a> {
                 if message.starts_with(Ping::bytes()) {
                     Ok(Message::Ping)
                 } else {
-                    eyre::bail!("This is not a ping message: {message:02x?}")
+                    Err(Error::DecodePing)
                 }
             }
             messages::PONG_ID => {
@@ -180,7 +182,7 @@ impl<'a> MessageCodec<'a> {
                 if message.starts_with(Pong::bytes()) {
                     Ok(Message::Pong)
                 } else {
-                    eyre::bail!("This is not a ping message: {message:02x?}")
+                    Err(Error::DecodePong)
                 }
             }
             id => {
@@ -214,14 +216,14 @@ impl<'a> MessageCodec<'a> {
 // TODO: make the Codec states more strict. Now its ok because we are using a specific flow
 
 impl<'a> Encoder<Message> for MessageCodec<'a> {
-    type Error = eyre::Error;
+    type Error = crate::error::Error;
 
     #[instrument(name = "encode", skip_all)]
     fn encode(&mut self, item: Message, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
         trace!("Sending: {item:?}");
         match item {
             Message::AuthAck(_) => {
-                eyre::bail!("Send Auth-Ack is not supported yet");
+                return Err(Error::Flow("Send Auth-Ack is not supported yet"));
             }
             Message::Auth => {
                 self.state = State::AuthAck;
@@ -265,7 +267,7 @@ impl<'a> Encoder<Message> for MessageCodec<'a> {
 
 impl<'a> Decoder for MessageCodec<'a> {
     type Item = Message;
-    type Error = eyre::Error;
+    type Error = crate::error::Error;
 
     #[instrument(name = "decode", skip_all)]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {

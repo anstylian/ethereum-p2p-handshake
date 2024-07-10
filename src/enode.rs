@@ -1,11 +1,10 @@
 use alloy_primitives::hex::FromHex;
-use eyre::Result;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     str::FromStr,
 };
 
-use crate::utils::NodeId;
+use crate::{error::Result, utils::NodeId};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Enode {
@@ -28,7 +27,7 @@ impl Enode {
 }
 
 impl FromStr for Enode {
-    type Err = eyre::Error;
+    type Err = crate::error::Error;
 
     fn from_str(input: &str) -> Result<Self> {
         enode_parser::parse(input)
@@ -36,6 +35,8 @@ impl FromStr for Enode {
 }
 
 mod enode_parser {
+    use crate::error::Error;
+
     use super::*;
 
     use nom::{
@@ -91,8 +92,11 @@ mod enode_parser {
 
     pub(crate) fn parse(input: &str) -> Result<Enode> {
         let (_remaining, (_, node_id, _, address)) =
-            complete(sequence::tuple((enode, node_id, at, ip)))(input)
-                .map_err(|e| eyre::eyre!("Failed to parse enode: {input:?}. nom error: {e:?}"))?;
+            complete(sequence::tuple((enode, node_id, at, ip)))(input).map_err(|e| {
+                Error::EnodeParse(format!(
+                    "Failed to parse enode: {input:?}. nom error: {e:?}"
+                ))
+            })?;
 
         Ok(Enode { node_id, address })
     }

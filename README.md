@@ -80,3 +80,7 @@ If you are using `nix` you can create a development environment using `nix devel
 To build the project using `nix` you can run `nix build`.
 
 To generate the docs you can uses `nix build .#ethereum-p2p-handshake.doc`.
+
+## Pending 
+
+Because this not a project for production, I didn't used my own errors in the library. As a future work the library could be expand with its own error type.

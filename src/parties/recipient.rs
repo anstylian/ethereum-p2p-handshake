@@ -1,11 +1,14 @@
 use alloy_primitives::B256;
-use eyre::{eyre, Result};
 use secp256k1::PublicKey;
 use std::{net::SocketAddr, time::Duration};
 use tokio::{net::TcpStream, time::timeout};
 use tracing::{debug, instrument};
 
-use crate::{enode::Enode, utils::id2pk};
+use crate::{
+    enode::Enode,
+    error::{Error, Result},
+    utils::id2pk,
+};
 
 /// Connection timeout in seconds
 const CONNECTION_TIMEOUT: u64 = 30;
@@ -35,7 +38,8 @@ impl Recipient {
             Duration::from_secs(CONNECTION_TIMEOUT),
             TcpStream::connect(self.address),
         )
-        .await??;
+        .await
+        .unwrap()?;
 
         Ok(stream)
     }
@@ -49,15 +53,15 @@ impl Recipient {
     }
 
     pub fn ephemeral_public_key(&self) -> Result<&PublicKey> {
-        self.ephemeral_public_key
-            .as_ref()
-            .ok_or(eyre!("Recipient public key is not initialized"))
+        self.ephemeral_public_key.as_ref().ok_or(Error::Str(
+            "Recipient ephemeral public key is not initialized",
+        ))
     }
 
     pub fn nonce(&self) -> Result<&B256> {
         self.nonce
             .as_ref()
-            .ok_or(eyre!("Recipient public key is not initialized"))
+            .ok_or(Error::Str("Recipient nonce is not initialized"))
     }
 
     pub fn set_nonce(&mut self, nonce: B256) {
@@ -71,7 +75,7 @@ impl Recipient {
 
 #[cfg(test)]
 impl TryFrom<super::initiator::Initiator> for Recipient {
-    type Error = eyre::Error;
+    type Error = crate::Error;
 
     fn try_from(initiator: super::initiator::Initiator) -> Result<Self> {
         let initiator_enode = initiator.enode()?;

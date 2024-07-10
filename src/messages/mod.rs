@@ -1,12 +1,12 @@
 use alloy_primitives::{B128, B256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::{BufMut, BytesMut};
-use eyre::Result;
 use secp256k1::{PublicKey, SecretKey};
 use tracing::warn;
 
 use crate::{
     codec::Id,
+    error::{Error, Result},
     utils::{aes_decrypt, ecdh_x, hmac_sha256, key_material},
 };
 
@@ -73,7 +73,7 @@ pub struct MessageDecryptor<'a> {
 impl<'a> MessageDecryptor<'a> {
     pub fn new(message: &'a mut [u8]) -> Result<Self> {
         if message.len() < (65 + 2 + 16) {
-            return Err(eyre::eyre!("Received message is too small"));
+            return Err(Error::MessageDecryption("Received message is too small"));
         }
 
         let (auth_data, remaining) = message.split_at_mut(2);
@@ -112,7 +112,7 @@ impl<'a> MessageDecryptor<'a> {
         if check_tag == self.tag {
             Ok(())
         } else {
-            Err(eyre::eyre!("Integrity check failed"))
+            Err(Error::MessageDecryption("Integrity check failed"))
         }
     }
 

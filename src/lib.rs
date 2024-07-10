@@ -1,17 +1,18 @@
-use std::net::SocketAddr;
 use codec::{Message, MessageCodec};
-use eyre::Result;
+use error::Error;
 use futures::SinkExt;
 use rlpx::Rlpx;
+use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 use tracing::{debug, error, instrument, trace, warn};
 
-use crate::{messages::hello::Hello, utils::pk2id};
+use crate::{error::Result, messages::hello::Hello, utils::pk2id};
 
 pub mod codec;
 pub mod enode;
+pub mod error;
 mod mac;
 pub mod messages;
 pub mod parties;
@@ -88,7 +89,7 @@ async fn handshake(transport: &mut RlpxTransport<'_>, recipient_address: SocketA
             None => {
                 let msg = "HANDSHAKE: Stream is finish. Is possible that you tried to reach the same node too frequently. Wait a bit and try again.";
                 warn!(?recipient_address, msg);
-                eyre::bail!(format!("{msg} address: {:?}", recipient_address));
+                return Err(Error::Handshake(recipient_address, msg));
             }
         }
     }

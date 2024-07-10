@@ -1,7 +1,7 @@
 use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
 use bytes::BytesMut;
-use eyre::{eyre, Result};
 
+use crate::error::{Error, Result};
 pub const ID: u8 = 0x1;
 
 #[repr(u8)]
@@ -44,7 +44,7 @@ impl Disconnect {
 }
 
 impl TryFrom<u8> for DisconnectReason {
-    type Error = eyre::Error;
+    type Error = crate::error::Error;
 
     fn try_from(value: u8) -> Result<Self> {
         match value {
@@ -61,7 +61,7 @@ impl TryFrom<u8> for DisconnectReason {
             0xa => Ok(DisconnectReason::IdentityIsTheSameAsThisNode),
             0xb => Ok(DisconnectReason::PingTimeout),
             0x10 => Ok(DisconnectReason::Other),
-            _ => Err(eyre!("Unknonw disconnect reason received")),
+            _ => Err(Error::Str("Unknonw disconnect reason received")),
         }
     }
 }

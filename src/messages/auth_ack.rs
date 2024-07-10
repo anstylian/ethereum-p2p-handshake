@@ -1,8 +1,7 @@
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use eyre::Result;
 use std::fmt::Display;
 
-use crate::utils::PROTOCOL_VERSION;
+use crate::{error::Result, utils::PROTOCOL_VERSION};
 
 #[derive(Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct AuthAck {

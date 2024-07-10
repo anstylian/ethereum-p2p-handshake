@@ -1,8 +1,10 @@
-use eyre::Result;
 use rand::Rng;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
 
-use crate::utils::{pk2id, secrets::generate_restorable_secret, NodeId, Nonce};
+use crate::{
+    error::Result,
+    utils::{pk2id, secrets::generate_restorable_secret, NodeId, Nonce},
+};
 
 const NODE_KEY: &str = "eth-node-key";
 

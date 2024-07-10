@@ -4,14 +4,14 @@ use aes::{
 };
 use alloy_primitives::{B128, B256};
 use ctr::Ctr64BE;
-use eyre::{eyre, Result};
 use hmac::{Hmac, Mac};
 use secp256k1::PublicKey;
-
-pub mod secrets;
-pub use alloy_primitives::{B256 as Nonce, B512 as NodeId};
 use secp256k1::SecretKey;
 use sha2::{Digest, Sha256};
+
+pub mod secrets;
+use crate::{error::Error, Result};
+pub use alloy_primitives::{B256 as Nonce, B512 as NodeId};
 
 pub const SECP256K1_TAG_PUBKEY_UNCOMPRESSED: u8 = 4;
 
@@ -39,7 +39,7 @@ pub fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> B256 {
 
 pub fn kdf(secret: B256, dest: &mut [u8]) -> Result<()> {
     concat_kdf::derive_key_into::<Sha256>(secret.as_slice(), &[], dest)
-        .map_err(|e| eyre!("Key derivation function failed: {e:?}"))?;
+        .map_err(|e| Error::Kdf(e))?;
 
     Ok(())
 }
