@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var(
             "RUST_LOG",
-            "warn,ethereum_p2p_handshake=error,handshake=info",
+            "warn,ethereum_p2p_handshake=warn,handshake=info",
         );
     }
     let args: EthereumHandshake = argh::from_env();
