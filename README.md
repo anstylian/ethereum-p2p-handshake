@@ -47,7 +47,7 @@ INFO handshake: Handshake completed succesfully addr=[RECIPIENT SOCK ADDR]
 
 FYI: I notice that if you try to handshake with a node too frquently then the handshake procedure will fail.
 
-### The `handshake` binary
+### The `ping-pong` binary
 
 This binary goes one step further and performs 10 ping-pong's exchange with the recipient node.
 
@@ -56,8 +56,23 @@ The program accepts a list of ethereum enode values. Enode is in this format:
 enode://[Node Id]@[IP]:[Port]
 ```
 
-For this is better to use a local node of `reth`. 
-
+For this is better to use a local node of `reth`. To run a local `reth` node use this command, from this directory.
+```bash
+docker run \
+    -v rethdata:/root/.local/share/reth/mainnet \
+    -v key:/root/key \
+    -p 30303:30303 \
+    ghcr.io/paradigmxyz/reth \
+    node \
+    --p2p-secret-key /root/key/initator2 \
+    --chain dev \
+    --disable-discovery \
+    -vvvvv
+```
+To connect to this local node use this enode id:
+```text
+enode://64c2b9ae828c0c2fb5bbfb3c54ac853fd6c473788fd05c8364647ea26489205834e844498c2a5500e78a5ad77fe54bd426c60cd08ae1a1da966c6feebddfc629@127.0.0.1:30303
+```
 
 ## Nix Flake
 If you are using `nix` you can create a development environment using `nix develop`.
