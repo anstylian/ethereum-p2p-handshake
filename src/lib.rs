@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-
 use codec::{Message, MessageCodec};
 use eyre::Result;
 use futures::SinkExt;
@@ -88,7 +87,7 @@ async fn handshake(transport: &mut RlpxTransport<'_>, recipient_address: SocketA
             }
             None => {
                 let msg = "HANDSHAKE: Stream is finish. Is possible that you tried to reach the same node too frequently. Wait a bit and try again.";
-                warn!(msg);
+                warn!(?recipient_address, msg);
                 eyre::bail!(format!("{msg} address: {:?}", recipient_address));
             }
         }

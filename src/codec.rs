@@ -37,7 +37,6 @@ pub enum Message {
 
 #[derive(Debug)]
 pub enum Id {
-    #[allow(dead_code)]
     P2pCapability(u8),
     Other(u8),
 }

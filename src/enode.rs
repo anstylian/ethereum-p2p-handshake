@@ -14,7 +14,6 @@ pub struct Enode {
 }
 
 impl Enode {
-    #[allow(unused)]
     pub fn new(enode: &str) -> Result<Enode> {
         enode.parse()
     }

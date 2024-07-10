@@ -32,7 +32,7 @@ pub fn pk2id(pk: &PublicKey) -> NodeId {
     NodeId::from_slice(&pk.serialize_uncompressed()[1..])
 }
 
-/// Agree for a secret.... TODO: enchance doc
+/// Agree for a secret. Secret is only the X of of the point.
 pub fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> B256 {
     B256::from_slice(&secp256k1::ecdh::shared_secret_point(public_key, secret_key)[..32])
 }

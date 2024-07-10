@@ -5,7 +5,6 @@ use eyre::{eyre, Result};
 pub const ID: u8 = 0x1;
 
 #[repr(u8)]
-#[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq)]
 pub enum DisconnectReason {
     DisconnectReqiested = 0x0_u8,
